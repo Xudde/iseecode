@@ -1,103 +1,418 @@
-# PHP 漏洞规则：taint 规则 + 敏感函数 pattern 兜底
-# 说明：semgrep OSS 对 PHP 的 taint 不支持跨函数传播（source 在调用点、sink 在函数体内时漏报），
-# 故增加 pattern 类"敏感函数调用"规则兜底命中，再由 Agent 深度研判确认数据流真假。
+# PHP 扩展规则（PHP_RULE_EXPANSION，test-first）
+# 设计：taint 优先 + 少量窄 pattern 兜底；不解决跨文件 taint（Semgrep OSS 限制）。
+# 参考：Semgrep p/php 的 taint/source/sanitizer 用法、Progpilot 的 sources/sinks/sanitizers 模型（仅参考，不安装）。
 rules:
   - id: php-sql-injection
     mode: taint
     languages: [php]
     severity: ERROR
-    message: SQL 注入：用户输入直接拼接进 SQL 查询
+    message: "SQL 注入：用户输入到达 SQL 执行点（框架/原生）；需确认拼接与可达性"
     pattern-sources:
       - pattern: $_GET[...]
       - pattern: $_POST[...]
       - pattern: $_REQUEST[...]
+      - pattern: $_FILES[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->post(...)
+      - pattern: $request->query(...)
+      - pattern: $request->all(...)
+      - pattern: $request->route(...)
+      - pattern: $request->route()->parameter(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
+      - pattern: Input::all(...)
+      - pattern: Route::input(...)
+    pattern-sanitizers:
+      - pattern: (int)$X
+      - pattern: (float)$X
+      - pattern: intval($X)
+      - pattern: floatval($X)
+      - pattern: PDO::quote($X)
+      - pattern: $PDO->quote($X)
+      - pattern: $STMT->bindValue(..., $X, ...)
+      - pattern: $STMT->bindParam(..., $X, ...)
     pattern-sinks:
       - pattern: mysqli_query($DB, $SQL)
       - pattern: mysql_query($SQL)
-      - pattern: $DB->query($SQL)
+      - pattern: PDO::query($SQL)
+      - pattern: PDO::exec($SQL)
+      - pattern: DB::raw($SQL)
+      - pattern: DB::statement($SQL)
+      - pattern: DB::select($SQL)
+      - pattern: DB::unprepared($SQL)
+      - pattern: $wpdb->query($SQL)
+      - patterns:
+          - pattern: $PDO->query($SQL)
+          - metavariable-regex:
+              metavariable: $PDO
+              regex: "(?i).*(pdo|db|conn|connection|mysqli|mysql).*"
+      - patterns:
+          - pattern: $PDO->exec($SQL)
+          - metavariable-regex:
+              metavariable: $PDO
+              regex: "(?i).*(pdo|db|conn|connection|mysqli|mysql).*"
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-command-injection
     mode: taint
     languages: [php]
     severity: ERROR
-    message: 命令注入：用户输入进入命令执行函数
+    message: "命令注入：用户输入到达命令执行函数"
     pattern-sources:
       - pattern: $_GET[...]
       - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_FILES[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->post(...)
+      - pattern: $request->query(...)
+      - pattern: $request->all(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
+    pattern-sanitizers:
+      - pattern: escapeshellarg($X)
+      - pattern: escapeshellcmd($X)
     pattern-sinks:
-      - pattern: system($CMD)
-      - pattern: exec($CMD)
-      - pattern: shell_exec($CMD)
-      - pattern: passthru($CMD)
-      - pattern: proc_open($CMD, ...)
-      - pattern: popen($CMD, ...)
-  - id: php-code-injection
-    languages: [php]
-    severity: ERROR
-    message: 代码注入：eval 执行动态代码
-    patterns:
-      - pattern: eval($X)
+      - pattern: system($X)
+      - pattern: exec($X)
+      - pattern: shell_exec($X)
+      - pattern: passthru($X)
+      - pattern: popen($X, ...)
+      - pattern: proc_open($X, ...)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-file-inclusion
     mode: taint
     languages: [php]
     severity: ERROR
-    message: 文件包含：用户输入进入 include/require，可导致 LFI/RFI
+    message: "文件包含：用户输入到达 include/require，可导致 LFI/RFI"
     pattern-sources:
       - pattern: $_GET[...]
+      - pattern: $_POST[...]
       - pattern: $_REQUEST[...]
+      - pattern: $_FILES[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->query(...)
+      - pattern: $request->all(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
     pattern-sinks:
       - pattern: include $X
+      - pattern: include_once $X
       - pattern: require $X
-      - pattern: include_once($X)
-      - pattern: require_once($X)
-  - id: php-unsafe-deserialization
+      - pattern: require_once $X
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
+  - id: php-ssrf-sink
+    mode: taint
+    languages: [php]
+    severity: WARNING
+    message: "SSRF/远程读取：用户输入到达 URL/文件读取点"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_FILES[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->query(...)
+      - pattern: $request->all(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
+    pattern-sinks:
+      - pattern: file_get_contents($X)
+      - pattern: curl_setopt($CH, CURLOPT_URL, $X)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
+  - id: php-unserialize
+    mode: taint
     languages: [php]
     severity: ERROR
-    message: 不安全反序列化：unserialize 处理不可信输入
-    patterns:
-      - pattern-either:
-          - pattern: unserialize($_GET[...])
-          - pattern: unserialize($_POST[...])
-          - pattern: unserialize($_REQUEST[...])
-  # ---- 敏感函数调用兜底（pattern 直接命中，数据流真假由 Agent 深度研判）----
+    message: "不安全反序列化：用户输入到达 unserialize"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $_FILES[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->post(...)
+      - pattern: $request->all(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
+    pattern-sinks:
+      - pattern: unserialize($X)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
+  - id: php-xss
+    mode: taint
+    languages: [php]
+    severity: WARNING
+    message: "反射型 XSS：用户输入未转义直接输出"
+    pattern-sources:
+      - pattern: $_GET[...]
+      - pattern: $_POST[...]
+      - pattern: $_REQUEST[...]
+      - pattern: $request->input(...)
+      - pattern: $request->get(...)
+      - pattern: $request->query(...)
+      - pattern: $request->all(...)
+      - pattern: request(...)
+      - pattern: Input::get(...)
+    pattern-sanitizers:
+      - pattern: htmlspecialchars($X, ...)
+      - pattern: htmlentities($X, ...)
+      - pattern: esc_html($X)
+      - pattern: esc_attr($X)
+      - pattern: esc_url($X)
+    pattern-sinks:
+      - pattern: echo $X;
+      - pattern: print $X;
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-sql-query-sink
     languages: [php]
     severity: ERROR
-    message: SQL 查询敏感点：query/exec/mysqli_query 调用。若 SQL 由用户输入拼接则存在 SQL 注入（需确认数据流）
+    message: "SQL 查询敏感点：原生/框架 SQL 执行调用；需确认是否拼接用户输入"
     patterns:
       - pattern-either:
-          - pattern: $X->query($SQL)
-          - pattern: $X->exec($SQL)
           - pattern: mysqli_query($DB, $SQL)
           - pattern: mysql_query($SQL)
+          - pattern: PDO::query($SQL)
+          - pattern: PDO::exec($SQL)
+          - pattern: DB::raw($SQL)
+          - pattern: DB::statement($SQL)
+          - pattern: DB::select($SQL)
+          - pattern: DB::unprepared($SQL)
+          - pattern: $wpdb->query($SQL)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
+  - id: php-pdo-query-sink
+    languages: [php]
+    severity: ERROR
+    message: "PDO SQL 执行点：query/exec；需确认 SQL 是否拼接用户输入"
+    patterns:
+      - pattern-either:
+          - pattern: $PDO->query($SQL)
+          - pattern: $PDO->exec($SQL)
+      - metavariable-regex:
+          metavariable: $PDO
+          regex: "(?i).*(pdo|db|conn|connection|mysqli|mysql).*"
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-file-read-sink
     languages: [php]
     severity: WARNING
-    message: 文件读取敏感函数：readfile/file/fopen。若参数含用户可控路径则任意文件读取
+    message: "文件读取敏感函数：readfile/file/fopen/file_get_contents；需确认路径是否可控"
     patterns:
       - pattern-either:
           - pattern: readfile($X)
           - pattern: file($X)
           - pattern: fopen($X, ...)
+          - pattern: file_get_contents($X)
+      - pattern-not: file_get_contents("php://input")
+      - pattern-not: file_get_contents('php://input')
+      - pattern-not: file_get_contents("php://temp")
+      - pattern-not: file_get_contents("php://memory")
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-file-delete-sink
     languages: [php]
     severity: WARNING
-    message: 文件删除敏感函数：unlink/rmdir。若参数含用户可控路径则任意文件删除（注意单次 ../ 过滤可用 ....// 绕过）
+    message: "文件删除敏感函数：unlink/rmdir；需确认路径是否可控"
     patterns:
       - pattern-either:
           - pattern: unlink($X)
           - pattern: rmdir($X)
-  - id: php-ssrf-sink
-    languages: [php]
-    severity: WARNING
-    message: 远程请求函数：file_get_contents/curl_exec 处理外部输入，可能导致任意文件读取或 SSRF（若响应再进入命令执行则升级 RCE）
-    patterns:
-      - pattern-either:
-          - pattern: file_get_contents($X)
-          - pattern: curl_exec($X)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-command-sink
     languages: [php]
     severity: WARNING
-    message: 命令执行敏感函数：shell_exec/exec/system/passthru/proc_open/popen。若参数经远程内容或用户输入到达则命令注入
+    message: "命令执行敏感函数：shell_exec/exec/system/passthru/proc_open/popen；需确认参数是否可控"
     patterns:
       - pattern-either:
           - pattern: shell_exec($X)
@@ -106,10 +421,58 @@ rules:
           - pattern: passthru($X)
           - pattern: proc_open($X, ...)
           - pattern: popen($X, ...)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
+  - id: php-code-injection
+    languages: [php]
+    severity: ERROR
+    message: "代码注入：eval/assert 执行动态代码；需确认输入来源"
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: assert($X)
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"
+
   - id: php-xss-reflected
     languages: [php]
     severity: WARNING
-    message: 反射型 XSS：用户输入直接输出到 HTTP 响应
+    message: "反射型 XSS：用户输入直接输出到 HTTP 响应"
     patterns:
       - pattern-either:
           - pattern: echo $_GET[...];
@@ -117,3 +480,23 @@ rules:
           - pattern: echo $_REQUEST[...];
           - pattern: print $_GET[...];
           - pattern: print $_POST[...];
+          - pattern: print $_REQUEST[...];
+    paths:
+      exclude:
+        - "**/vendor/**"
+        - "vendor/**"
+        - "**/node_modules/**"
+        - "node_modules/**"
+        - "**/tests/**"
+        - "tests/**"
+        - "**/test/**"
+        - "test/**"
+        - "**/*Test.php"
+        - "**/docs/**"
+        - "docs/**"
+        - "**/example/**"
+        - "example/**"
+        - "**/examples/**"
+        - "examples/**"
+        - "**/fixtures/**"
+        - "fixtures/**"

@@ -1,0 +1,59 @@
+# JavaScript (Node.js) 漏洞规则（≥5 条）
+rules:
+  - id: js-command-injection
+    mode: taint
+    languages: [javascript]
+    severity: ERROR
+    message: 命令注入：用户输入进入 child_process 执行
+    pattern-sources:
+      - pattern: req.query.$K
+      - pattern: req.body
+      - pattern: req.params
+    pattern-sinks:
+      - pattern: child_process.exec($CMD, ...)
+      - pattern: 'require("child_process").exec($CMD, ...)'
+  - id: js-sql-injection
+    mode: taint
+    languages: [javascript]
+    severity: ERROR
+    message: SQL 注入：用户输入直接拼接进查询语句
+    pattern-sources:
+      - pattern: req.query.$K
+      - pattern: req.body.$K
+    pattern-sinks:
+      - pattern: $DB.query($SQL + $X, ...)
+      - pattern: "$DB.query(`...${$X}...`)"
+  - id: js-eval
+    languages: [javascript]
+    severity: ERROR
+    message: 代码执行：使用 eval 执行动态代码
+    patterns:
+      - pattern: eval($X)
+  - id: js-path-traversal
+    mode: taint
+    languages: [javascript]
+    severity: ERROR
+    message: 路径穿越：用户输入直接拼接文件路径
+    pattern-sources:
+      - pattern: req.query.$K
+      - pattern: req.params
+    pattern-sinks:
+      - pattern: fs.readFile($P, ...)
+      - pattern: fs.readFileSync($P, ...)
+  - id: js-hardcoded-secret
+    languages: [javascript]
+    severity: WARNING
+    message: 硬编码密钥：源码中写死敏感凭据
+    patterns:
+      - pattern: '$KEY = "..."'
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(secret|password|api_key|apikey|token).*
+  - id: js-xxe
+    languages: [javascript]
+    severity: WARNING
+    message: XXE：XML 解析未禁用外部实体
+    patterns:
+      - pattern-either:
+          - pattern: "libxml.parseXml($X, { noent: true })"
+          - pattern: 'require("xml2js").parseString($X, ...)'

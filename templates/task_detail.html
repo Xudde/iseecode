@@ -127,7 +127,7 @@
   <table class="tbl">
     <thead><tr>
       <th style="width:86px">等级</th><th style="width:170px">漏洞类型</th><th>位置</th>
-      <th style="width:110px">Agent 研判</th><th style="width:90px">POC</th><th>研判理由</th>
+      <th style="width:110px">Agent 研判</th><th style="width:120px" title="平台库 poc_verified">POC（平台库）</th><th>研判理由</th>
     </tr></thead>
     <tbody id="vuln-body">
       <tr><td colspan="6"><div class="empty">加载中…</div></td></tr>
@@ -138,7 +138,18 @@
 
 <script>window.__LABELS__ = {{ vuln_labels | tojson }};</script>
 {% else %}
-<div class="empty">任务不存在，可能已被删除。<a href="/">返回任务列表</a></div>
+<div class="page-head">
+  <div>
+    <div class="page-title">任务不存在</div>
+    <div class="page-sub">可能已被删除，或任务号有误。</div>
+  </div>
+</div>
+<div class="card">
+  <div class="empty">
+    没有找到这个任务。
+    <div style="margin-top:14px"><a class="btn btn-primary" href="/">返回任务列表</a></div>
+  </div>
+</div>
 {% endif %}
 {% endblock %}
 
@@ -179,8 +190,14 @@ async function copyText(text) {
 /* ---------- 头部渲染 ---------- */
 function renderHead() {
   document.getElementById('hd-status').innerHTML = SAP.statusPill(task.status);
-  const mode = task.audit_mode === 'static' ? '仅静态扫描（未做沙箱/POC）'
-    : task.audit_mode === 'poc' ? '沙箱 POC 验证' : '完整审计';
+  const ptype = task.project_type || 'web';
+  const sbOff = sandboxStatusOf(task, vulns).globalOffLatest;
+  const canSandbox = task.audit_mode !== 'static'
+    && !['driver', 'apk', 'image', 'decompile'].includes(ptype);
+  const skipNote = (sbOff && canSandbox) ? '（沙箱总开关关闭：本次跳过 POC）' : '';
+  const mode = (task.audit_mode === 'static' ? '仅静态扫描（未做沙箱/POC）'
+    : task.audit_mode === 'poc' ? '沙箱 POC 验证'
+    : task.audit_mode === 'large' ? '大项目模式（无文件上限）' : '完整审计') + skipNote;
   document.getElementById('hd-meta').innerHTML =
     `<div class="kv">
       <span>技术栈 ${SAP.stackTags(task.tech_stack)}</span>
@@ -200,7 +217,7 @@ function renderHead() {
   if (['cancelled', 'failed', 'skipped'].includes(task.status))
     h += `<button class="btn btn-green" id="btn-resume">继续任务</button>`;
   if (task.report_path) {
-    h += `<a class="btn btn-primary" href="/api/tasks/${TASK_ID}/report" target="_blank">下载 HTML 报告</a>`;
+    h += `<a class="btn btn-primary" href="/api/tasks/${TASK_ID}/report" title="下载 HTML 报告（附件）">下载 HTML 报告</a>`;
     h += `<a class="btn" href="/api/tasks/${TASK_ID}/report?format=md">Markdown</a>`;
     h += `<a class="btn" href="/api/tasks/${TASK_ID}/report?format=json">JSON（AI 版）</a>`;
     h += `<button class="btn" id="btn-agent-prompt">复制 AI 深挖提示词</button>`;
@@ -283,18 +300,60 @@ function capLine(cls, title, text) {
   return `<div class="cap-line ${cls}"><span class="cap-dot"></span><div><b>${title}</b>${text ? '：' + SAP.esc(text) : ''}</div></div>`;
 }
 
+/* 以任务真实字段/日志推导沙箱与 POC 状态；不猜测、不伪造。 */
+function sandboxStatusOf(task, vulns) {
+  const log = String(task.log || '');
+  const pocRows = (vulns || []).filter(v => v.poc_verified === true).length;
+  const lastOff = log.lastIndexOf('沙箱功能已在「复现环境」页关闭');
+  const attempts = [...log.matchAll(/部署 Docker 沙箱环境/g)].map(x => x.index);
+  const successes = [...log.matchAll(/沙箱已按\s*([^\s]+)\s*栈部署|沙箱已部署(?!策略)/g)]
+    .map(x => ({ idx: x.index, stack: x[1] || '' }));
+  const pocs = [...log.matchAll(/POC 验证完成[：:]\s*(\d+)\s*\/\s*(\d+)\s*条验证通过/g)];
+  const lastAttempt = attempts.length ? Math.max(...attempts) : -1;
+  const lastSuccess = successes.length ? successes[successes.length - 1] : null;
+  const lastPoc = pocs.length ? pocs[pocs.length - 1] : null;
+  const lastActivity = Math.max(lastAttempt, lastSuccess ? lastSuccess.idx : -1,
+    lastPoc ? lastPoc.index : -1);
+  const depMatch = log.match(/[^\n]*(?:依赖安装失败|沙箱未就绪|应用可能缺少依赖|启动失败|部署失败)[^\n]*/);
+  const retainIdx = log.lastIndexOf('沙箱容器保留中');
+  const destroyIdx = Math.max(log.lastIndexOf('沙箱容器已销毁'), log.lastIndexOf('沙箱容器已退出'),
+    log.lastIndexOf('清理失效引用'));
+  return {
+    log, pocRows,
+    lastSuccess,
+    attempted: lastAttempt >= 0 || !!lastSuccess,
+    poc: lastPoc
+      ? { passed: Number(lastPoc[1]), total: Number(lastPoc[2]) }
+      : null,
+    globalOffLatest: lastOff >= 0 && lastOff > lastActivity,
+    retained: retainIdx > destroyIdx || (!!task.sandbox_cid && destroyIdx < 0),
+    destroyed: destroyIdx >= 0,
+    depFail: !!depMatch && (!attempts.length || depMatch.index >= lastAttempt),
+    depLine: (depMatch ? depMatch[0] : '').trim()
+  };
+}
+window.__sandboxStatusOf = sandboxStatusOf;
+
 function renderCapabilities() {
   const card = document.getElementById('cap-card');
   const list = document.getElementById('cap-list');
   if (!task) { card.hidden = true; return; }
   const L = task.log || '';
   const isStatic = task.audit_mode === 'static';
+  const limitText = task.audit_mode === 'large' ? '无文件上限' : `当前 ${cfgMaxFiles}`;
   const ptype = task.project_type || 'web';
   const final = FINAL.includes(task.status);
+  const sb = sandboxStatusOf(task, vulns);
+  const pocLib = sb.pocRows
+    ? `动态复现 ${sb.pocRows} 条（历史/已核实，不代表本次运行）`
+    : '动态复现 0 条';
   const out = [];
 
   if (task.audit_mode === 'poc') {
     out.push(capLine('info', '沙箱 POC 验证模式', '仅部署沙箱并执行命中验证，不调用 LLM/Agent（0 token）；验证通过只代表该 POC 在沙箱内成立。'));
+  }
+  if (task.audit_mode === 'large') {
+    out.push(capLine('info', '大项目模式', '已取消文件数熔断，任务走 heavy 队列；CodeQL/全量审计可能耗时较长，建议空闲时运行。'));
   }
   if (ptype === 'driver') {
     out.push(capLine('info', 'Windows 驱动静态审计', 'PE 结构/导入/签名 + capa 能力识别 + Ghidra 反汇编导出伪 C；不加载驱动，IOCTL 逻辑与 DACL 仍需人工复核。'));
@@ -306,10 +365,34 @@ function renderCapabilities() {
     out.push(capLine('info', '反编译任务', '对反编译产物做静态扫描，不部署沙箱；行号仅供参考。'));
   } else if (isStatic) {
     out.push(capLine('info', '仅静态扫描', '未启动 Agent、沙箱与 POC（0 token），POC 列为空属正常。'));
+  } else if (sb.globalOffLatest) {
+    out.push(capLine('warn', '沙箱总开关已关闭',
+      '本次未部署沙箱、未做 POC（在「复现环境」页关闭）；以下是静态结果。' +
+      (task.sandbox_cid ? ' 已有保留容器不受影响。' : '')));
+    out.push(capLine(sb.pocRows ? 'ok' : 'info', '平台库 POC 记录', pocLib));
+  } else if (sb.lastSuccess) {
+    const pocTxt = sb.poc
+      ? `本次 POC 验证 ${sb.poc.passed}/${sb.poc.total} 条通过`
+      : '日志未记录本次 POC 通过数';
+    const holdTxt = sb.retained ? '容器已保留，可手动重放'
+      : (sb.destroyed ? '容器已销毁/清理' : '容器状态见任务日志');
+    out.push(capLine('ok', '沙箱已部署' + (sb.lastSuccess.stack ? `（${sb.lastSuccess.stack} 栈）` : ''),
+      `${pocTxt}；${holdTxt}。`));
+    out.push(capLine(sb.pocRows ? 'ok' : 'info', '平台库 POC 记录', pocLib));
+    if (sb.depFail) {
+      out.push(capLine('warn', '沙箱依赖/启动告警', (sb.depLine || '日志记录了依赖或启动失败').slice(0, 180)));
+    }
+  } else if (sb.attempted || sb.depFail) {
+    out.push(capLine('warn', '沙箱部署/启动失败，POC 未验证',
+      (sb.depLine || '日志有部署尝试，但未找到“沙箱已按…栈部署”成功标记').slice(0, 180)));
+    out.push(capLine(sb.pocRows ? 'ok' : 'info', '平台库 POC 记录', pocLib));
   } else if (task.sandbox_cid) {
-    out.push(capLine('ok', '沙箱已保留', `可展开带 POC 的条目，在禁网容器内手工重放（容器端口 ${task.sandbox_port || '-'}）。`));
+    out.push(capLine('ok', '沙箱已保留',
+      `容器端口 ${task.sandbox_port || '-'}；日志未记录本次 POC 通过数，可手动重放。`));
+    out.push(capLine(sb.pocRows ? 'ok' : 'info', '平台库 POC 记录', pocLib));
   } else if (final) {
-    out.push(capLine('warn', '沙箱未部署，POC 未验证', '沙箱默认先查挖矿特征；干净时允许依赖拉取，启动后自动断网。若依赖/构建仍失败或没有可启动入口，会降级为纯静态验证，平台不会伪造成已复现。'));
+    out.push(capLine('info', '未发现沙箱部署记录', '本次未做 POC（任务提前结束或该模式不适用）。'));
+    out.push(capLine(sb.pocRows ? 'ok' : 'info', '平台库 POC 记录', pocLib));
   } else {
     out.push(capLine('info', '沙箱部署策略', '默认先查挖矿特征；干净时允许依赖拉取，启动后断网；PHP/自包含 Python 最可靠，真实 Java/Node 仍可能因构建/数据库依赖失败。'));
   }
@@ -325,13 +408,13 @@ function renderCapabilities() {
 
   if (!isStatic && task.audit_mode !== 'poc') {
     if (L.includes('全量审计已熔断')) {
-      out.push(capLine('warn', '全量审计已熔断', `工作区文件数超过阈值（当前 ${cfgMaxFiles}），本次已跳过并节省 token。可在「平台设置」调整 full_audit_max_files。`));
+      out.push(capLine('warn', '全量审计已熔断', `工作区文件数超过阈值（${limitText}），本次已跳过并节省 token。可在「平台设置」调整 full_audit_max_files。`));
     } else if (L.includes('未配置 LLM')) {
       out.push(capLine('info', 'LLM 未配置', '本次未执行 Agent 研判与全量审计，结果全部来自静态规则与四引擎。'));
     } else if (L.includes('全量审计完成')) {
       out.push(capLine('ok', '全量审计已执行', 'Agent 已自主遍历源码，结果标记为「全量审计」并参与报告。'));
     } else if (task.status === 'agent_full_audit') {
-      out.push(capLine('info', '全量审计进行中', `工作区文件数未超过阈值（当前 ${cfgMaxFiles}），Agent 正在自主遍历源码。`));
+      out.push(capLine('info', '全量审计进行中', `工作区文件数（${limitText}），Agent 正在自主遍历源码。`));
     } else if (final) {
       out.push(capLine('info', '全量审计未执行', '本次未进入全量审计（可能因任务类型、停止或异常），详见执行日志。'));
     }
@@ -409,7 +492,7 @@ function renderStats() {
     <div class="stat s-bad"><div class="num">${c.real}</div><div class="lbl">Agent 确认 / 疑似真实</div></div>
     <div class="stat s-dim"><div class="num">${c.fp}</div><div class="lbl">判定误报</div></div>
     <div class="stat s-warn"><div class="num">${c.pending}</div><div class="lbl">未研判 / 未验证</div></div>
-    <div class="stat s-ok"><div class="num">${c.poc}</div><div class="lbl">POC 动态复现</div></div>`;
+    <div class="stat s-ok"><div class="num">${c.poc}</div><div class="lbl" title="平台库 poc_verified=1 的条数（含历史/已核实记录）">POC 动态复现（平台库）</div></div>`;
   const eng = { semgrep: 0, gitleaks: 0, trivy: 0, selfcve: 0, authz: 0, codeql: 0, jsintel: 0, other: 0 };
   vulns.forEach(v => {
     const rid = String(v.rule_id || '').toLowerCase();
@@ -483,9 +566,11 @@ function pocBlock(v) {
       <textarea rows="2" id="pta-${v.id}" placeholder="粘贴 POC payload，例如 GET /?fn=system&arg=id">${SAP.esc(v.poc_payload || '')}</textarea>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-sm btn-primary poc-run" data-vuln="${v.id}">在沙箱内执行</button>
-        ${v.poc_payload ? `<a class="btn btn-sm" href="/api/tasks/${TASK_ID}/poc-script/${v.id}">下载 POC 脚本</a>` : ''}
+        ${v.poc_payload ? `<button class="btn btn-sm poc-http" data-vuln="${v.id}">Burp 请求包</button>
+        <a class="btn btn-sm" href="/api/tasks/${TASK_ID}/poc-script/${v.id}">下载 POC 脚本</a>` : ''}
         <span class="muted" style="font-size:11.5px">仅在保留的禁网沙箱容器内执行；手工结果不自动写回研判结论</span>
       </div>
+      <pre class="code" id="poch-${v.id}" hidden></pre>
       <pre class="code poc-result" id="pocr-${v.id}" hidden></pre>
     </div>`;
   return h;
@@ -541,12 +626,12 @@ function renderVulns(force) {
       <td><div class="vreason" title="${SAP.esc(v.agent_reason || v.llm_reason || '')}">${SAP.esc(v.agent_reason || v.llm_reason || '（无研判理由）')}</div></td>
     </tr>
     ${open ? `<tr class="vdetail-row" data-id="${v.id}"><td colspan="6"><div class="vdetail-in">
-        <h4>研判理由</h4><div class="ev-text">${SAP.esc(v.agent_reason || v.llm_reason || '（无）')}</div>
-        ${v.precondition ? `<h4>复现条件</h4><div class="poc-line">${SAP.esc(v.precondition)}</div>` : ''}
-        ${v.agent_evidence ? `<h4>证据链</h4><div class="ev-text">${SAP.esc(v.agent_evidence)}</div>` : ''}
+        <h4>研判理由</h4><div class="ev-text">${SAP.multiline(v.agent_reason || v.llm_reason || '（无）')}</div>
+        ${v.precondition ? `<h4>复现条件</h4><div class="poc-line">${SAP.multiline(v.precondition)}</div>` : ''}
+        ${v.agent_evidence ? `<h4>证据链</h4><div class="ev-text">${SAP.multiline(v.agent_evidence)}</div>` : ''}
         ${v.code_snippet ? `<h4>代码片段（第 ${v.line} 行高亮${v.source === 'agent-full' ? '，全量审计发现，行号供参考' : ''}）</h4>${codeBlock(v)}` : ''}
         ${pocBlock(v)}
-        ${v.verify_result ? `<h4>验证结果</h4><div class="ev-text">${SAP.esc(v.verify_result)}</div>` : ''}
+        ${v.verify_result ? `<h4>验证结果</h4><div class="ev-text">${SAP.multiline(v.verify_result)}</div>` : ''}
       </div></td></tr>` : ''}`;
   }).join('');
   vulnPage = SAP.renderPager(pager, list.length, vulnPage, vulnPageSize, VULN_PAGE_SIZES, onVulnPage);
@@ -569,7 +654,8 @@ document.getElementById('f-search').addEventListener('input', e => {
 
 /* 行展开 / 收起（委托） */
 document.getElementById('vuln-body').addEventListener('click', e => {
-  if (e.target.closest('.poc-run') || e.target.closest('a') || e.target.closest('textarea')) return;
+  if (e.target.closest('.poc-run') || e.target.closest('.poc-http')
+      || e.target.closest('a') || e.target.closest('textarea')) return;
   const row = e.target.closest('.vuln-row');
   if (!row) return;
   const id = Number(row.dataset.id);
@@ -592,6 +678,24 @@ document.getElementById('vuln-body').addEventListener('click', async e => {
       body: JSON.stringify({ vuln_id: Number(id), payload: payload.trim() })
     });
     pre.textContent = `HTTP ${data.status}\n${'─'.repeat(56)}\n${data.response}`;
+  } catch (err) { pre.textContent = '错误: ' + err.message; }
+});
+
+/* Burp 原始请求包（委托） */
+document.getElementById('vuln-body').addEventListener('click', async e => {
+  const btn = e.target.closest('.poc-http');
+  if (!btn) return;
+  e.preventDefault();
+  const id = btn.dataset.vuln;
+  const pre = document.getElementById('poch-' + id);
+  pre.hidden = false; pre.textContent = '生成中…';
+  try {
+    const r = await fetch(`/api/tasks/${TASK_ID}/poc-http/${id}`, {headers: {'Accept': 'text/plain'}});
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.detail || ('HTTP ' + r.status));
+    }
+    pre.textContent = await r.text();
   } catch (err) { pre.textContent = '错误: ' + err.message; }
 });
 
@@ -631,7 +735,7 @@ async function loadChains() {
           <div class="cn-type">${SAP.esc(n.type || '')}</div>
           <div class="cn-label">${SAP.esc(n.label || n.id || '')}</div>
           <div class="cn-loc">${SAP.esc(n.file || '')}${n.line ? ':' + n.line : ''}</div>
-          ${(n.code || n.evidence) ? `<details><summary>证据</summary>${n.code ? `<div>${SAP.esc(n.code)}</div>` : ''}${n.evidence ? `<div>${SAP.esc(n.evidence)}</div>` : ''}</details>` : ''}
+          ${(n.code || n.evidence) ? `<details><summary>证据</summary>${n.code ? `<div style="white-space:pre-wrap;word-break:break-word">${SAP.esc(n.code)}</div>` : ''}${n.evidence ? `<div style="white-space:pre-wrap;word-break:break-word">${SAP.multiline(n.evidence)}</div>` : ''}</details>` : ''}
         </div>`).join('<div class="chain-arrow">→</div>');
       return `<div class="chain-item"><div class="chain-title">${c.verified ? '✅' : '⚠️'} ${SAP.esc(c.title)}
         <button class="btn btn-sm chain-verify" data-chain="${c.id}">${c.verified ? '重新验证' : '验证'}</button>
@@ -674,7 +778,7 @@ async function loadAuthzSemantic() {
         <td><code>${SAP.esc(x.path)}</code></td>
         <td><span class="pill ${x.labels === 'anonymous' ? 'fp' : 'na'}">${SAP.esc(x.labels)}</span></td>
         <td><code>${SAP.esc(x.evidence_file)}:${x.evidence_line}</code></td>
-        <td style="font-size:11px">${SAP.esc(x.note || '')}</td>
+        <td style="font-size:11px;white-space:pre-wrap">${SAP.multiline(x.note || '')}</td>
       </tr>`).join('') || '<tr><td colspan="5"><div class="empty">没有匿名/条件放行接口</div></td></tr>';
   } catch (e) { card.hidden = true; }
 }
@@ -684,11 +788,12 @@ let timer = null;
 async function refresh() {
   try {
     task = await SAP.api(`/api/tasks/${TASK_ID}`);
-    renderHead(); renderFingerprint(); renderCapabilities(); renderLog();
+    renderHead(); renderFingerprint(); renderLog();
     if (FINAL.includes(task.status)) loadHotlist();
     loadChains();
     loadAuthzSemantic();
     vulns = await SAP.api(`/api/tasks/${TASK_ID}/vulns`);
+    renderCapabilities();
     renderVulns();
     if (FINAL.includes(task.status) && timer) { clearInterval(timer); timer = null; }
   } catch (e) { /* 保留上次数据 */ }

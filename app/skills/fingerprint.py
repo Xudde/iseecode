@@ -8,6 +8,7 @@
 """
 import json
 import logging
+import os
 from pathlib import Path
 
 log = logging.getLogger("fingerprint")
@@ -124,7 +125,7 @@ COMPONENT_RULES = [
     ("GraphQL", ["graphql"]),
 ]
 
-MAX_SCAN_FILES = 4000          # 限制遍历文件数
+MAX_SCAN_FILES = int(os.environ.get("AUDIT_FINGERPRINT_MAX_FILES", "4000"))  # 0=不限制
 FEATURE_READ_BYTES = 8192      # 特征文件只读前 8KB
 # 跳过的大型/无关目录（bin/obj/target 保留：.NET 编译产物 dll 在 bin/ 下，是重要指纹与反编译来源）
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".idea", ".vscode",
@@ -146,7 +147,7 @@ def fingerprint(workspace: str) -> dict:
         return {"components": [], "ext_stats": {}, "total_files": 0}
 
     for p in root.rglob("*"):
-        if scanned >= MAX_SCAN_FILES:
+        if MAX_SCAN_FILES > 0 and scanned >= MAX_SCAN_FILES:
             break
         if not p.is_file():
             continue
@@ -165,8 +166,9 @@ def fingerprint(workspace: str) -> dict:
 
     # 组件识别：全部文件相对路径都参与匹配（编译产物按文件名即可识别，如 NPOI/IKVM/Newtonsoft.dll），
     # 特征文件额外读内容（前 8KB），弥补纯源码包无特征文件的场景。
-    path_parts = [p.relative_to(root).as_posix().lower()
-                  for p in root.rglob("*") if p.is_file()][:MAX_SCAN_FILES]
+    all_parts = [p.relative_to(root).as_posix().lower()
+                 for p in root.rglob("*") if p.is_file()]
+    path_parts = all_parts if MAX_SCAN_FILES <= 0 else all_parts[:MAX_SCAN_FILES]
     haystack_parts: list[str] = list(path_parts)
     for p in feature_hits[:80]:
         try:

@@ -145,6 +145,7 @@ code { font-family: var(--mono); font-size: .92em; background: color-mix(in srgb
 }
 .side-foot { margin-top: auto; padding: 12px 16px 14px; border-top: 1px solid var(--line-soft); font-size: 11.5px; color: var(--text-faint); line-height: 1.8; }
 .side-foot .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-right: 6px; box-shadow: 0 0 6px var(--green); }
+.side-foot .dot.bad { background: var(--red); box-shadow: 0 0 6px var(--red); }
 
 /* 主题切换按钮 */
 .theme-btn {
@@ -161,7 +162,7 @@ html[data-theme="light"] .theme-btn .ic-moon { display: none; }
 html[data-theme="dark"] .theme-btn .t-dark { display: none; }
 html[data-theme="light"] .theme-btn .t-light { display: none; }
 
-.main { flex: 1; min-width: 0; padding: 26px 30px 60px; max-width: 1500px; }
+.main { flex: 1; min-width: 0; padding: 26px 30px 60px; max-width: 1800px; width: 100%; }
 
 /* ---------------- 页头 ---------------- */
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
@@ -231,6 +232,22 @@ html[data-theme="light"] .seg { background: #ffffff; }
 .upload-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
 .upload-msg { font-size: 12.5px; color: var(--text-dim); min-height: 18px; }
 .upload-msg.err { color: var(--red); }
+#sandbox-off-note { flex: 1 0 100%; margin: 0; }
+.api-error { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; margin: 0 0 14px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent); border-radius: 10px; }
+.api-error[hidden] { display: none; }
+.api-error-ico { flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; background: var(--red);
+  color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; margin-top: 1px; }
+.api-error-txt { flex: 1; font-size: 12.5px; line-height: 1.55; color: var(--text); }
+.api-error-txt b { display: block; color: var(--red); }
+.api-error-msg { color: var(--text-dim); word-break: break-word; }
+.seg label:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+.seg input:disabled { cursor: not-allowed; }
+.skel { height: 14px; border-radius: 7px;
+  background: linear-gradient(90deg, var(--bg-soft) 25%, var(--line) 37%, var(--bg-soft) 63%);
+  background-size: 400% 100%; animation: skel 1.2s ease infinite; }
+@keyframes skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 .upload-msg.ok { color: var(--green); }
 .progress { height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; margin-top: 12px; display: none; }
 .progress.on { display: block; }
@@ -351,6 +368,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .fchip {
   font-size: 12px; padding: 5px 13px; border-radius: 20px; cursor: pointer;
   border: 1px solid var(--line); background: var(--bg-soft); color: var(--text-dim); transition: all .15s;
+  font-family: inherit;
 }
 html[data-theme="light"] .fchip { background: #ffffff; }
 .fchip:hover { color: var(--text); border-color: var(--accent-dim); }
@@ -374,11 +392,12 @@ pre.code {
   font-family: var(--mono); font-size: 12px; line-height: 1.6;
   background: var(--term-code-bg); border: 1px solid var(--term-line); border-radius: 8px;
   padding: 10px 12px; overflow: auto; max-height: 320px; color: var(--term-code-text);
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
 }
 pre.code .hl { color: var(--term-hl); background: rgba(239, 68, 68, .15); display: inline-block; width: 100%; border-radius: 3px; font-weight: 600; }
-.poc-line { font-family: var(--mono); font-size: 12.5px; color: var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); border: 1px dashed color-mix(in srgb, var(--amber) 38%, transparent); border-radius: 6px; padding: 7px 10px; word-break: break-all; }
+.poc-line { font-family: var(--mono); font-size: 12.5px; color: var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); border: 1px dashed color-mix(in srgb, var(--amber) 38%, transparent); border-radius: 6px; padding: 7px 10px; word-break: break-word; white-space: pre-wrap; }
 html[data-theme="light"] .poc-line { color: #92610a; }
-.ev-text { font-size: 12.5px; color: var(--text-dim); }
+.ev-text { font-size: 12.5px; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; line-height: 1.7; }
 .poc-box textarea { font-family: var(--mono); font-size: 12px; margin: 8px 0; }
 .poc-result { margin-top: 8px; }
 

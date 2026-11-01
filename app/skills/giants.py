@@ -555,7 +555,13 @@ def _engine_jsintel(ctx: EngineContext) -> list[dict]:
 def _engine_codeql(ctx: EngineContext) -> list[dict]:
     return codeql_scan.scan(ctx.workspace, ctx.log_fn,
                             ram_mb=ctx.settings.get("codeql_ram_mb"),
-                            threads=ctx.settings.get("codeql_threads"))
+                            threads=ctx.settings.get("codeql_threads"),
+                            max_files=ctx.settings.get("codeql_max_files"),
+                            db_timeout=ctx.settings.get("codeql_db_timeout"),
+                            analyze_timeout=ctx.settings.get("codeql_analyze_timeout"),
+                            min_free_mb=ctx.settings.get("codeql_min_free_mb"),
+                            java_buildless=ctx.settings.get("codeql_java_buildless"),
+                            high_value=ctx.settings.get("codeql_high_value"))
 
 
 def _engine_semgrep(ctx: EngineContext) -> list[dict]:
@@ -585,7 +591,7 @@ ENGINE_SPECS = [
     EngineSpec("codeql", "CodeQL 数据流", _engine_codeql, order=20,
                setting_key="engine_codeql", description="security-extended 数据流"),
     EngineSpec("semgrep", "授权/配置规则包", _engine_semgrep, order=30,
-               description="内置 authz-config + data/rules 自定义规则"),
+               description="内置 authz-config + framework + data/rules 自定义规则"),
     EngineSpec("gitleaks", "gitleaks 密钥", _engine_gitleaks, order=40,
                setting_key="engine_gitleaks", requires_docker=True,
                description="密钥熵扫描（Docker）"),

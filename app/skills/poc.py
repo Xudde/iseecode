@@ -390,24 +390,70 @@ def verify(vuln: dict, workspace: str, handle) -> tuple[bool, str]:
         except Exception as e:
             return False, f"请求失败: {type(e).__name__}"
 
-    # 通用：单 payload 或多 payload 逐一尝试
+    # 通用：单 payload 或多 payload 逐一尝试。
+    # 先打一次**不带 payload 的基线**再差分比对：2026-11-01 查出 4 行假阳
+    # （InvoicePlane #81123、livehelperchat #116956/#116957、vvveb #32616），
+    # 特征都是 expect=["2"] + "HTTP 404，响应命中特征: ['2']" —— 单个数字在任何
+    # HTML（版本号、年份、class 名）里都会命中，而 404 根本不是执行成功的证据。
     method = poc.get("method", "GET")
     params_list = poc.get("params_list") or [poc["params"]]
-    baseline_500 = False
+    try:
+        base_status, base_body = handle.request(poc["route"], {}, method=method)
+    except Exception as e:
+        return False, f"基线请求失败: {type(e).__name__}"
+    try:
+        bcode = int(base_status)
+    except (TypeError, ValueError):
+        bcode = 0
+    if not 100 <= bcode < 600:
+        return False, (f"基线请求（不带 payload）都没拿到 HTTP 响应（status={base_status}），"
+                       f"应用未启动或路由不可达，不算复现")
+
     try:
         for params in params_list:
             status, body = handle.request(poc["route"], params, method=method)
-            low = (body or "").lower()
-            hits = [k for k in poc["expect"] if k.lower() in low]
-            if hits:
-                return True, f"HTTP {status}，响应命中特征: {hits}"
-            if status >= 500:
-                baseline_500 = True
-        if baseline_500:
-            return True, "payload 触发服务端异常（与正常请求行为不同），疑似复现"
-        return False, "响应未命中特征"
+            ok, why = _judge(status, body, bcode, base_body, poc["expect"])
+            if ok:
+                return True, why
+        return False, (f"payload 与基线（HTTP {bcode}）无实质差异，"
+                       f"基线本身已含特征 {_hits(poc['expect'], base_body)}，不算复现")
     except Exception as e:
         return False, f"请求失败: {type(e).__name__}"
+
+
+def _hits(expect, body):
+    """返回 body 里出现的特征词（大小写不敏感）。"""
+    low = (body or "").lower()
+    return [k for k in (expect or []) if str(k).lower() in low]
+
+
+def _judge(status, body, base_code, base_body, expect):
+    """纯函数：payload 响应 vs 基线响应，要不要算复现。可单测，不起沙箱。
+
+    三条硬规则：
+      1. 必须真的拿到 HTTP 响应（HTTP 0 / 连不上不算）；
+      2. 只有 2xx/3xx 才算正例 —— 404/403 的错误页里含不含数字都毫无意义；
+      3. 特征必须是**基线没有、payload 才有**的差分，否则任何页面都能命中弱特征。
+    5xx 只有相对基线是新增时才给"疑似"，并在文案里说明它不等于回显证据。
+    """
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        code = 0
+    if not 100 <= code < 600:
+        return False, (f"沙箱未返回任何 HTTP 响应（status={status}），"
+                       f"应用未启动或路由不可达，不算复现")
+    ph = _hits(expect, body)
+    bh = _hits(expect, base_body)
+    delta = [k for k in ph if k not in bh]
+    if 200 <= code < 400 and delta:
+        return True, (f"HTTP {code}（基线 HTTP {base_code}），相对基线新增特征 {delta}"
+                      + (f"；基线已含 {bh} 已排除" if bh else ""))
+    if code >= 500 and base_code < 500:
+        return True, (f"HTTP {code} 触发服务端异常，基线是 HTTP {base_code}，行为差异成立；"
+                      f"但这只是『疑似』，没有回显证据不升级为已复现")
+    return False, (f"HTTP {code} 相对基线 HTTP {base_code} 无有效新增特征"
+                   f"（payload 命中 {ph}，基线命中 {bh}）")
 
 
 def _poc_priority(item, workspace: str):
@@ -444,3 +490,57 @@ def verify_all(vuln_rows: list[tuple], workspace: str, handle, max_n: int = 8) -
             row.poc_verified = False
             row.verify_result = f"POC 执行异常: {e}"[:300]
     return passed
+
+
+def generate_burp_request(payload: str, host: str = "<TARGET>",
+                          cookie: str = "", headers: list[str] | None = None) -> str:
+    """把平台 payload 渲染成 Burp Repeater 可直接粘贴的原始 HTTP 请求。
+    支持：GET /path?x=1、POST /path body: {...}、POST /path\\n{...}、
+    POST /path\\nid=1&email=x、POST /path (登录态 Cookie) | {...}。"""
+    text = (payload or "").strip().strip("`")
+    if " body:" in text:
+        head, _, body = text.partition(" body:")
+    else:
+        head, _, body = text.partition("\n")
+    head, body = head.strip(), body.strip()
+    note = ""
+    m = re.match(r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\S+)\s*(.*)$", head, re.I)
+    if m:
+        method, path, tail = m.group(1).upper(), m.group(2), m.group(3).strip()
+        if tail.startswith(("{", "[")):
+            body = tail if not body else tail + "\n" + body
+        elif "|" in tail:
+            note, _, tail_body = tail.partition("|")
+            note, tail_body = note.strip(), tail_body.strip()
+            body = tail_body if tail_body else body
+        elif tail:
+            note = tail
+            if "=" in tail:
+                body = tail if not body else tail + "\n" + body
+    elif head.startswith(("{", "[")) or body.startswith(("{", "[")):
+        method, path = "POST", "/"
+        body = (head + ("\n" + body if body else "")).strip()
+    elif "=" in head:
+        method, path, body = "POST", "/", (head + ("\n" + body if body else "")).strip()
+    else:
+        method, path, body = "GET", ("/" + head.lstrip("/") if head else "/"), body
+    if not cookie and re.search(r"cookie|登录|已鉴权|鉴权", note, re.I):
+        cookie = "sessionid=<登录态 Cookie>"
+    lines = [
+        f"{method} {path} HTTP/1.1",
+        f"Host: {host}",
+        "User-Agent: Mozilla/5.0",
+        "Accept: */*",
+        "Connection: close",
+    ]
+    if cookie:
+        lines.append(f"Cookie: {cookie}")
+    for h in (headers or []):
+        if ":" in h:
+            lines.append(h.strip())
+    if body:
+        ctype = ("application/json" if body.startswith(("{", "["))
+                 else "application/x-www-form-urlencoded")
+        lines += [f"Content-Type: {ctype}",
+                  f"Content-Length: {len(body.encode('utf-8'))}"]
+    return "\n".join(lines) + "\n\n" + (body + "\n" if body else "")

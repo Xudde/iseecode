@@ -6,9 +6,15 @@
 <div class="page-head">
   <div>
     <div class="page-title">审计任务</div>
-    <div class="page-sub">上传源码包，平台自动完成：静态扫描（规则 + 四引擎） → LLM 误报研判 → 沙箱 POC（仅自包含应用） → Agent 全量审计（大仓库自动熔断） → 报告</div>
+    <div class="page-sub">上传源码包，平台自动完成：静态扫描（规则 + 四引擎） → LLM 误报研判 → 沙箱 POC（仅自包含应用） → Agent 全量审计（大项目模式可关闭熔断） → 报告</div>
   </div>
   <div class="head-actions" id="overview-chips"></div>
+</div>
+
+<div id="api-error" class="api-error" hidden>
+  <div class="api-error-ico">!</div>
+  <div class="api-error-txt"><b id="api-error-title">任务数据加载失败</b><span id="api-error-msg"></span></div>
+  <button type="button" class="btn btn-sm" id="api-retry">重试</button>
 </div>
 
 <!-- ==================== 上传 ==================== -->
@@ -25,9 +31,11 @@
     <div class="upload-meta">
       <div class="seg">
         <label><input type="radio" name="audit_mode" value="full" checked><span>完整审计（Agent 研判 + 全量审计）</span></label>
+        <label><input type="radio" name="audit_mode" value="large"><span>大项目模式（无文件上限，heavy 队列）</span></label>
         <label><input type="radio" name="audit_mode" value="static"><span>仅静态扫描（不耗 token，不部署沙箱）</span></label>
         <label><input type="radio" name="audit_mode" value="poc"><span>沙箱 POC 验证（0 token）</span></label>
       </div>
+      <div class="tip-box" id="sandbox-off-note" hidden></div>
       <button type="submit" class="btn btn-primary" id="btn-upload">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         上传并开始审计
@@ -41,13 +49,13 @@
       <span class="type-chip">.pyc → Python</span><span class="type-chip">.so/.elf/.bin → 字符串特征</span>
     </div>
     <div class="tip-box"><b>省钱建议</b>：相同文件自动去重不重复消耗 token。先用「仅静态扫描」免费看 semgrep 命中与组件指纹，确认有值得深挖的疑点后再跑完整审计；中途中停止的任务可随时「继续」续跑，已研判部分不会重复计费。</div>
-    <div class="tip-box"><b>能力边界（如实告知）</b>：完整审计中的全量审计在源码文件超过 500 个时自动熔断（可在「平台设置」调整）；Docker 沙箱为禁网环境，仅 php / 自包含 python 小项目可自动部署，真实 Java/Node 项目通常无法做 POC——任务页会明确标注「未验证」，不会伪造成已复现。</div>
+    <div class="tip-box"><b>能力边界（如实告知）</b>：普通完整审计默认在 3000 文件熔断（可在「平台设置」调整）；「大项目模式」取消文件熔断并走 heavy 队列，但 CodeQL/全量审计可能跑很久，建议空闲时使用。Docker 沙箱为禁网环境，仅 php / 自包含 python 小项目可自动部署，真实 Java/Node 项目通常无法做 POC——任务页会明确标注「未验证」，不会伪造成已复现。</div>
     <div class="tip-box"><b>驱动审计说明</b>：.sys 做静态 PE 审计（导入/签名/节属性/设备与内存等攻击面）+ <b>capa 能力识别 + Ghidra 反汇编伪 C（如已安装）</b>，<b>不加载驱动</b>，IOCTL 逻辑与 DACL 需人工复核；系统自带驱动常用目录签名（.cat），平台只能检测嵌入签名，签名结论请在 Windows 上用 Get-AuthenticodeSignature 复核。</div>
   </form>
 </div>
 
 <!-- ==================== 进行中 ==================== -->
-<div class="section-title">进行中的任务 <span class="cnt" id="active-count">0</span></div>
+<div class="section-title" id="active-title">进行中的任务 <span class="cnt" id="active-count">0</span></div>
 <div class="tbl-wrap">
   <table class="tbl">
     <thead><tr><th style="width:60px">ID</th><th>文件名</th><th style="width:130px">状态</th><th style="width:200px">技术栈</th><th style="width:170px">创建时间</th><th style="width:220px">操作</th></tr></thead>
@@ -56,7 +64,7 @@
 </div>
 
 <!-- ==================== 历史 ==================== -->
-<div class="section-title">历史任务 <span class="cnt" id="done-count">0</span></div>
+<div class="section-title" id="history-title">历史任务 <span class="cnt" id="done-count">0</span></div>
 <div class="tbl-wrap">
   <table class="tbl">
     <thead><tr><th style="width:60px">ID</th><th>文件名</th><th style="width:130px">状态</th><th style="width:200px">技术栈</th><th style="width:170px">创建时间</th><th style="width:280px">操作</th></tr></thead>
@@ -72,7 +80,35 @@
 const FINAL = SAP.FINAL;
 const MAX_UPLOAD_MB = {{ max_upload_mb|default(4096) }};
 let tasks = [];
+let loadedOnce = false;
+let apiFailed = false;
+let lastOkAt = null;
+let statusFilter = 'all';
 let uploading = false;
+let sandboxEnabled = null;
+
+/* 沙箱总开关关闭时：明确提示并把“沙箱 POC 验证”降级为不可选 */
+function applySandboxState() {
+  const poc = document.querySelector('input[name=audit_mode][value=poc]');
+  const note = document.getElementById('sandbox-off-note');
+  if (!poc || !note || sandboxEnabled === null) return;
+  if (sandboxEnabled) { poc.disabled = false; note.hidden = true; return; }
+  poc.disabled = true;
+  note.hidden = false;
+  note.innerHTML = '<b>沙箱总开关已关闭</b>（「复现环境」页）：本次无法部署沙箱或做 POC，' +
+    '「沙箱 POC 验证」已禁用；需要 POC 请先在「复现环境」开启沙箱。';
+  if (poc.checked) {
+    const st = document.querySelector('input[name=audit_mode][value=static]');
+    if (st) st.checked = true;
+    const msg = document.getElementById('upload-msg');
+    msg.className = 'upload-msg';
+    msg.textContent = '沙箱总开关已关闭，POC 模式已禁用；已切换到「仅静态扫描」';
+  }
+}
+SAP.api('/api/labs').then(d => {
+  sandboxEnabled = !!d.sandbox_enabled;
+  applySandboxState();
+}).catch(() => { /* 读不到开关时不禁用，避免误判 */ });
 let selectedFiles = [];
 const TASK_PAGE_SIZES = [10, 20, 50];
 let taskPage = 1;
@@ -84,7 +120,7 @@ function rowActions(t, isActive) {
   let h = `<a class="btn btn-sm" href="/tasks/${t.id}">详情</a>`;
   if (isActive) h += ` <button class="btn btn-sm btn-danger act-stop" data-id="${t.id}">停止</button>`;
   if (['cancelled', 'failed', 'skipped'].includes(t.status)) h += ` <button class="btn btn-sm btn-green act-resume" data-id="${t.id}">继续</button>`;
-  if (t.report_path) h += ` <a class="btn btn-sm" href="/api/tasks/${t.id}/report" target="_blank">报告</a>`;
+  if (t.report_path) h += ` <a class="btn btn-sm" href="/api/tasks/${t.id}/report" title="下载 HTML 报告（附件）">下载报告</a>`;
   h += ` <button class="btn btn-sm btn-danger act-del" data-id="${t.id}" data-name="${SAP.esc(t.filename)}">删除</button>`;
   return h;
 }
@@ -92,7 +128,9 @@ function rowActions(t, isActive) {
 function renderRow(t) {
   const isActive = !FINAL.includes(t.status);
   const mode = t.audit_mode === 'static'
-    ? '<span class="vbadge vb-fp" style="margin-left:6px">仅静态</span>' : '';
+    ? '<span class="vbadge vb-fp" style="margin-left:6px">仅静态</span>'
+    : t.audit_mode === 'large'
+      ? '<span class="vbadge" style="margin-left:6px">大项目</span>' : '';
   const err = (!isActive && t.error_msg)
     ? `<div class="muted" style="font-size:11.5px;color:var(--red);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${SAP.esc(t.error_msg)}">${SAP.esc(t.error_msg)}</div>` : '';
   return `<tr>
@@ -105,9 +143,57 @@ function renderRow(t) {
   </tr>`;
 }
 
+function showApiError(msg) {
+  const box = document.getElementById('api-error');
+  document.getElementById('api-error-title').textContent = loadedOnce
+    ? '任务数据刷新失败（显示上次成功数据）' : '任务数据加载失败';
+  const when = loadedOnce && lastOkAt
+    ? ' · 上次成功 ' + lastOkAt.toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  document.getElementById('api-error-msg').textContent = (msg || '无法连接后端') + when;
+  box.hidden = false;
+}
+
+function clearApiError() {
+  const box = document.getElementById('api-error');
+  if (box) box.hidden = true;
+}
+
+/* 首次加载失败：不能把“加载失败”显示成 0 个任务 / 暂无历史 */
+function renderApiFailure() {
+  document.getElementById('active-count').textContent = '—';
+  document.getElementById('done-count').textContent = '—';
+  document.getElementById('overview-chips').innerHTML =
+    '<span class="fchip">全部 —</span>' +
+    '<span class="fchip">进行中 —</span>' +
+    '<span class="fchip">已完成 —</span>' +
+    '<span class="fchip">已停止 —</span>' +
+    '<span class="fchip">已跳过 —</span>';
+  const row = '<tr><td colspan="6"><div class="empty">任务数据加载失败，请点击上方“重试”</div></td></tr>';
+  document.getElementById('active-body').innerHTML = row;
+  document.getElementById('done-body').innerHTML = row;
+  document.getElementById('done-pager').innerHTML = '';
+}
+
+function renderLoading() {
+  document.getElementById('active-count').textContent = '…';
+  document.getElementById('done-count').textContent = '…';
+  document.getElementById('overview-chips').innerHTML =
+    '<span class="fchip">全部 …</span><span class="fchip">进行中 …</span>' +
+    '<span class="fchip">已完成 …</span><span class="fchip">已停止 …</span><span class="fchip">已跳过 …</span>';
+  const row = '<tr><td colspan="6"><div class="skel" style="width:100%"></div></td></tr>';
+  document.getElementById('active-body').innerHTML = row;
+  document.getElementById('done-body').innerHTML = row.repeat(3);
+  document.getElementById('done-pager').innerHTML = '';
+}
+
 function render() {
+  if (!loadedOnce && apiFailed) { renderApiFailure(); return; }
+  if (!loadedOnce) { renderLoading(); return; }
   const active = tasks.filter(t => !FINAL.includes(t.status));
-  const done = tasks.filter(t => FINAL.includes(t.status));
+  const finalTasks = tasks.filter(t => FINAL.includes(t.status));
+  const counts = { completed: 0, cancelled: 0, skipped: 0, failed: 0 };
+  finalTasks.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+  const done = statusFilter === 'all' ? finalTasks : finalTasks.filter(t => t.status === statusFilter);
   document.getElementById('active-count').textContent = active.length;
   document.getElementById('done-count').textContent = done.length;
   document.getElementById('active-body').innerHTML = active.map(renderRow).join('')
@@ -117,7 +203,7 @@ function render() {
   const start = (taskPage - 1) * taskPageSize;
   const donePageTasks = done.slice(start, start + taskPageSize);
   document.getElementById('done-body').innerHTML = donePageTasks.map(renderRow).join('')
-    || `<tr><td colspan="6"><div class="empty">暂无历史任务</div></td></tr>`;
+    || `<tr><td colspan="6"><div class="empty">${statusFilter === 'all' ? '暂无历史任务' : '暂无该状态的任务'}</div></td></tr>`;
   taskPage = SAP.renderPager(
     document.getElementById('done-pager'), done.length, taskPage, taskPageSize,
     TASK_PAGE_SIZES,
@@ -127,19 +213,33 @@ function render() {
       try { localStorage.setItem('sap-task-page-size', String(size)); } catch (e) {}
       render();
     });
-  const ok = done.filter(t => t.status === 'completed').length;
-  document.getElementById('overview-chips').innerHTML =
-    `<span class="fchip">全部 <span class="n">${tasks.length}</span></span>` +
-    `<span class="fchip">进行中 <span class="n">${active.length}</span></span>` +
-    `<span class="fchip">已完成 <span class="n">${ok}</span></span>`;
+  const chip = (key, label, n) =>
+    `<button type="button" class="fchip${statusFilter === key ? ' active' : ''}" data-status="${key}">${label} <span class="n">${n}</span></button>`;
+  let chips = chip('all', '全部', tasks.length) +
+    `<button type="button" class="fchip" data-status="active">进行中 <span class="n">${active.length}</span></button>` +
+    chip('completed', '已完成', counts.completed) +
+    chip('cancelled', '已停止', counts.cancelled) +
+    chip('skipped', '已跳过', counts.skipped);
+  if (counts.failed) chips += chip('failed', '失败', counts.failed);
+  document.getElementById('overview-chips').innerHTML = chips;
 }
 
 async function poll() {
   if (uploading) return;
   try {
     tasks = await SAP.api('/api/tasks');
+    loadedOnce = true;
+    apiFailed = false;
+    lastOkAt = new Date();
+    clearApiError();
+    SAP.setServiceStatus(true);
     render();
-  } catch (e) { /* 服务暂不可达时保留上一次数据 */ }
+  } catch (e) {
+    apiFailed = true;
+    SAP.setServiceStatus(false, '服务连接失败');
+    showApiError(e && e.message ? e.message : '无法连接后端');
+    if (!loadedOnce) renderApiFailure(); else render();
+  }
 }
 
 /* ---------- 上传（XHR 进度条） ---------- */
@@ -236,6 +336,7 @@ document.querySelector('.main').addEventListener('click', async e => {
   } else if (resume) {
     e.preventDefault();
     const id = resume.dataset.id;
+    if (!confirm(`确定继续任务 #${id}？\n已研判部分不会重复消耗 token；将按原模式重新开跑。`)) return;
     try { await SAP.api(`/api/tasks/${id}/resume`, { method: 'POST' }); SAP.toast('任务已续跑', 'ok'); poll(); }
     catch (err) { SAP.toast('续跑失败：' + err.message, 'err'); }
   } else if (del) {
@@ -247,7 +348,29 @@ document.querySelector('.main').addEventListener('click', async e => {
   }
 });
 
+renderLoading();
 poll();
 setInterval(poll, 3000);
+document.getElementById('api-retry').addEventListener('click', () => poll());
+
+/* 状态筛选：全部 / 已完成 / 已停止 / 已跳过 / 失败；进行中滚动到上方“进行中的任务” */
+document.getElementById('overview-chips').addEventListener('click', e => {
+  const btn = e.target.closest('[data-status]');
+  if (!btn) return;
+  const st = btn.dataset.status;
+  if (st === 'active') {
+    statusFilter = 'all';
+    taskPage = 1;
+    render();
+    const t = document.getElementById('active-title');
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  statusFilter = st;
+  taskPage = 1;
+  render();
+  const h = document.getElementById('history-title');
+  if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 </script>
 {% endblock %}

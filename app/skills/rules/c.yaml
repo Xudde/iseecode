@@ -1,0 +1,37 @@
+rules:
+- id: c-unsafe-scanf
+  message: scanf 无宽度限制，可能缓冲区溢出
+  severity: ERROR
+  languages:
+  - c
+  pattern: scanf("%s", ...)
+- id: c-strcpy
+  message: 不安全的 strcpy 字符串拷贝，存在缓冲区溢出风险
+  severity: ERROR
+  languages:
+  - c
+  pattern: strcpy($DST, $SRC)
+- id: c-strcat
+  message: 不安全的 strcat 字符串拼接
+  severity: ERROR
+  languages:
+  - c
+  pattern: strcat($DST, $SRC)
+- id: c-gets
+  message: 使用 gets，必然的缓冲区溢出风险
+  severity: ERROR
+  languages:
+  - c
+  pattern: gets(...)
+- id: c-system-call
+  message: system() 执行 shell 命令，存在命令注入风险
+  severity: WARNING
+  languages:
+  - c
+  pattern: system(...)
+- id: c-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages:
+  - c
+  pattern-regex: (?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"

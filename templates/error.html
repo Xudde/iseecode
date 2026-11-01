@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set nav = '' %}
+{% block title %}页面不存在 · 源码自动化审计平台{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <div class="page-title">页面不存在</div>
+    <div class="page-sub">404 · {{ path }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="empty">
+    没有找到这个页面。可能链接已过期，或地址输入有误。
+    <div style="margin-top:14px"><a class="btn btn-primary" href="/">返回任务列表</a></div>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,131 @@
+# 框架级规则包：只做候选发现，数据流真假交给 Agent/沙箱确认。
+rules:
+  - id: framework-freemarker-execute
+    languages: [generic]
+    severity: ERROR
+    message: FreeMarker 模板执行敏感点（Execute/Template.process）；若参数来自请求，重点核查 SSTI/RCE
+    paths:
+      include:
+        - "*.java"
+        - "*.ftl"
+    pattern-regex: 'freemarker\.template\.utility\.Execute|new\s+Execute\s*\(|Template\.process\s*\('
+
+  - id: framework-velocity-evaluate
+    languages: [generic]
+    severity: ERROR
+    message: Velocity 模板求值敏感点；若模板/上下文来自请求，重点核查 SSTI/RCE
+    paths:
+      include:
+        - "*.java"
+    pattern-regex: 'Velocity(Engine)?\.evaluate\s*\('
+
+  - id: framework-xmlrpc-serializable
+    languages: [generic]
+    severity: ERROR
+    message: XML-RPC/反序列化入口；核查是否存在未授权 XML-RPC 和 CommonsBeanutils 等 gadget
+    paths:
+      include:
+        - "*.java"
+        - "*.xml"
+    pattern-regex: 'webtools/control/xmlrpc|/control/xmlrpc|XmlRpcServer|readObject\s*\('
+
+  - id: framework-drupal-post-render
+    languages: [generic]
+    severity: ERROR
+    message: Drupal Form API 渲染回调敏感点；核查 mail[#post_render]/element_parents 是否可由未授权请求控制
+    paths:
+      include:
+        - "*.php"
+        - "*.module"
+        - "*.inc"
+    pattern-regex: '#post_render|element_parents|user_register_form'
+
+  - id: framework-ignition-execute-solution
+    languages: [generic]
+    severity: ERROR
+    message: Laravel Ignition 执行入口；核查 debug 模式、log/phar 链和 execute-solution 是否可达
+    paths:
+      include:
+        - "*.php"
+    pattern-regex: 'MakeViewVariableOptionalSolution|execute-solution|viewFile\s*='
+
+  - id: framework-jimureport-version
+    languages: [generic]
+    severity: ERROR
+    message: JimuReport 版本过旧（1.0-1.5），存在 Freemarker/未授权报表 RCE 风险；请核对 CVE-2023-4450 修复版本
+    paths:
+      include:
+        - "pom.xml"
+        - "*.gradle"
+    pattern-regex: '<jimureport[^>]*\.version>\s*1\.[0-5]\.|jimureport[^\n]{0,80}1\.[0-5]\.'
+
+  - id: framework-ignition-version
+    languages: [generic]
+    severity: WARNING
+    message: facade/ignition 版本疑似低于 2.5.2；核对 CVE-2021-3129
+    paths:
+      include:
+        - "composer.lock"
+        - "composer.json"
+    pattern-regex: 'facade/ignition[^\n]{0,120}(1\.|2\.[0-4]\.)'
+
+  - id: framework-solr-velocity
+    languages: [generic]
+    severity: ERROR
+    message: Solr Velocity/params resource loader 敏感点；核查 config API 是否未授权、v.template 是否可控
+    paths:
+      include:
+        - "*.java"
+        - "*.xml"
+        - "*.adoc"
+    pattern-regex: 'VelocityResponseWriter|params\.resource\.loader\.enabled|v\.template'
+
+  - id: framework-xwiki-solrsearch
+    languages: [generic]
+    severity: ERROR
+    message: XWiki SolrSearch 入口；核查 RSS/Groovy 宏是否允许未授权模板执行（CVE-2025-24893）
+    paths:
+      include:
+        - "*.xml"
+        - "*.vm"
+        - "*.java"
+    pattern-regex: 'Main/SolrSearch|SolrSearchMacros|media=rss'
+
+  - id: framework-apisix-batch
+    languages: [generic]
+    severity: ERROR
+    message: APISIX batch-requests/filter_func 敏感点；核查 admin API 是否可绕过 IP 限制（CVE-2022-24112）
+    paths:
+      include:
+        - "*.lua"
+        - "*.yaml"
+        - "*.yml"
+    pattern-regex: 'batch-requests|batch_requests|filter_func'
+
+  - id: framework-metabase-setup
+    languages: [generic]
+    severity: ERROR
+    message: Metabase setup/validate 入口；核查 setup-token 可读性与 H2 JDBC INIT（CVE-2023-38646）
+    paths:
+      include:
+        - "*.clj"
+        - "*.cljc"
+    pattern-regex: 'setup/validate|test-database-connection|setup-token'
+
+  - id: framework-langflow-validate
+    languages: [generic]
+    severity: ERROR
+    message: Langflow validate/code 入口；核查是否要求认证、code 是否进入 exec（CVE-2025-3248）
+    paths:
+      include:
+        - "*.py"
+    pattern-regex: 'validate/code|validate_code|post_validate_code'
+
+  - id: framework-thinkphp-invoke
+    languages: [generic]
+    severity: ERROR
+    message: ThinkPHP 反射调用敏感点；核查 invokefunction/call_user_func_array 是否可由 s 参数控制
+    paths:
+      include:
+        - "*.php"
+    pattern-regex: 'invokefunction|call_user_func_array|Request/input'

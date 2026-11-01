@@ -24,7 +24,7 @@
     <select id="audit-action" class="mini" style="min-width:180px">
       <option value="">全部动作</option>
     </select>
-    <input id="audit-target" type="text" placeholder="目标，如 task:95" style="max-width:220px">
+    <input id="audit-target" type="text" placeholder="目标，如 task:123" style="max-width:220px">
     <button class="btn btn-sm" id="btn-audit-filter">筛选</button>
   </div>
   <div class="tbl-wrap" style="max-height:560px;overflow:auto">
@@ -67,10 +67,16 @@ async function loadAuditSummary() {
   const el = document.getElementById('audit-summary');
   try {
     const d = await SAP.api('/api/audit/summary?hours=24');
-    const items = d.items || [];
-    el.innerHTML = items.length
-      ? items.map(x => `<span class="stack-tag" style="margin:0 6px 6px 0">${SAP.esc(x.action)} × ${x.count}</span>`).join('')
-      : '<span class="muted">近 24 小时没有变更类操作</span>';
+    const items = (d.items || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
+    if (!items.length) {
+      el.innerHTML = '<span class="muted">近 24 小时没有变更类操作</span>';
+      return;
+    }
+    const chip = x => `<span class="stack-tag" style="margin:0 6px 6px 0">${SAP.esc(x.action)} × ${x.count}</span>`;
+    const top = items.slice(0, 12), rest = items.slice(12);
+    el.innerHTML = `<div>${top.map(chip).join('')}</div>` +
+      (rest.length ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">展开全部 ${items.length} 项</summary>` +
+        `<div style="margin-top:6px">${rest.map(chip).join('')}</div></details>` : '');
   } catch (e) {
     el.textContent = '统计读取失败：' + e.message;
   }

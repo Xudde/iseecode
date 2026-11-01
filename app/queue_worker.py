@@ -8,19 +8,25 @@ import json
 import logging
 import os
 import queue
+import shutil
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 from app.db import SessionLocal
-from app.models import AgentRun, Task, Vulnerability
+from app.models import AgentRun, Config, ExploitChain, Task, Vulnerability
 from app.skills import (apk_analyze, decompile, driver_analyze, image_baseline, llm_judge,
                         poc, preprocess, report, sast_semgrep, sandbox, tech_detect)
 from app.agent_settings import agent_settings
 from app.agent import orchestrator
 
-# 阶段 0.4：优先级队列（poc 动态任务 > full > static），seq 防止同优先级比较 task_id
-task_queue: "queue.PriorityQueue[tuple[int, int, int]]" = queue.PriorityQueue()
+# 阶段 8 v8.1：沙箱任务与静态/LLM 分析任务分队列，互不阻塞
+# analysis_queue: full（LLM/深挖）> static；sandbox_queue: poc（纯沙箱验证）
+# v9.1: heavy_queue 专跑大项目模式（large），避免 CodeQL/全量审计堵住普通任务
+analysis_queue: "queue.PriorityQueue[tuple[int, int, int]]" = queue.PriorityQueue()
+sandbox_queue: "queue.PriorityQueue[tuple[int, int, int]]" = queue.PriorityQueue()
+heavy_queue: "queue.PriorityQueue[tuple[int, int, int]]" = queue.PriorityQueue()
 _queue_seq = itertools.count()
 
 # 全量审计熔断：实测千文件级仓库（GitLab 4000 文件 900 步 0 发现，147 万 token）
@@ -39,6 +45,24 @@ def count_audit_files(workspace: str) -> int:
         dirnames[:] = [d for d in dirnames if d.lower() not in AUDIT_COUNT_SKIP_DIRS]
         n += len(filenames)
     return n
+
+
+def _task_settings(db, task) -> dict:
+    """大项目模式按任务覆盖全局阈值：文件不限制、CodeQL 超时放宽。"""
+    st = agent_settings(db)
+    if (getattr(task, "audit_mode", "") or "") == "large":
+        st = dict(st)
+        st["full_audit_max_files"] = 0
+        st["codeql_max_files"] = 0
+        st["codeql_db_timeout"] = max(3600, int(st.get("codeql_db_timeout") or 0))
+        st["codeql_analyze_timeout"] = max(3600, int(st.get("codeql_analyze_timeout") or 0))
+        if int(st.get("codeql_ram_mb") or 0) < 8192:
+            st["codeql_high_value"] = 1
+    elif (getattr(task, "audit_mode", "") or "") == "poc":
+        # POC 模式只做沙箱验证，不让 CodeQL 把 POC 队列拖死
+        st = dict(st)
+        st["engine_codeql"] = 0
+    return st
 
 
 # _log 会被 Agent 线程池的多个工作线程并发调用（共享同一 Session，
@@ -70,14 +94,18 @@ def _gen_report(db, task, partial: bool = False) -> None:
             return
         try:
             llm_cfg = llm_judge.get_llm_config(db)
-            # 静态/POC 模式承诺 0 token：AI 命名也跳过
+            name_max = int(os.environ.get("AUDIT_REPORT_NAME_MAX", "80"))
+            # 静态/POC 模式承诺 0 token：AI 命名也跳过；大批量报告不做逐批命名，避免尾部 LLM 调用挂住 worker
             if (llm_cfg is not None and getattr(task, "audit_mode", "full") not in ("static", "poc")
+                    and len(db_vulns) <= name_max
                     and any(not (r.title or "").strip() for r in db_vulns)):
                 _log(db, task, "为漏洞生成可读中文名称（LLM 批量命名）…")
                 n_named = llm_judge.name_vulns(db, task, db_vulns, llm_cfg,
                                                log_fn=lambda m: _log(db, task, m))
                 if n_named:
                     _log(db, task, f"已命名 {n_named} 条漏洞")
+            elif len(db_vulns) > name_max:
+                _log(db, task, f"跳过 LLM 批量命名（{len(db_vulns)} 条 > 上限 {name_max}），报告用 rule_id/已有标题")
         except Exception as e:
             _log(db, task, f"漏洞命名失败（不影响报告）: {e}")
         report_vulns = [{
@@ -100,7 +128,18 @@ def _gen_report(db, task, partial: bool = False) -> None:
                 _log(db, task, f"人工深挖清单：Top {len(hot['items'])} 文件（0 token）")
         except Exception as e:
             _log(db, task, f"深挖清单生成失败（不影响报告）: {e}")
-        report_path = report.run_report(task, report_vulns, hotlist=hot)
+        chains = []
+        try:
+            for c in db.query(ExploitChain).filter(ExploitChain.task_id == task.id).order_by(ExploitChain.id).all():
+                try:
+                    nodes = json.loads(c.nodes_json or "[]")
+                except Exception:
+                    nodes = []
+                chains.append({"id": c.id, "title": c.title, "verified": bool(c.verified),
+                               "nodes": nodes})
+        except Exception:
+            chains = []
+        report_path = report.run_report(task, report_vulns, hotlist=hot, chains=chains)
         task.report_path = report_path
         _log(db, task, f"报告已生成：{report_path}")
     except Exception as e:
@@ -132,6 +171,16 @@ def _maybe_cancel(db, task, handle=None) -> bool:
     return False
 
 
+def _sandbox_globally_enabled(db) -> bool:
+    """「复现环境」页的沙箱总开关（Config.sandbox_enabled，默认开）。
+    关掉后新任务不部署沙箱、也不做 POC 验证 —— 批量跑静态时可以省掉大量容器。"""
+    try:
+        row = db.get(Config, "sandbox_enabled")
+        return (row.value if row else "1") != "0"
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _process(task_id: int) -> None:
     db = SessionLocal()
     try:
@@ -143,7 +192,16 @@ def _process(task_id: int) -> None:
             task.error_msg = "任务已被用户停止"
             db.commit()
             return
+        # 磁盘刹车：空间不足就不展开新任务（解压工作区 + CodeQL 临时库都要写盘）。
+        # 写爆根盘会连带把平台 SQLite 打坏，宁可等待也不要把盘填满。
+        floor = float(os.getenv("AUDIT_MIN_FREE_GB", "4"))
+        while shutil.disk_usage("/").free / 1024 ** 3 < floor:
+            log.warning(f"磁盘空闲不足 {floor}G，任务 {task_id} 暂停等待空间释放（60s 后重试）")
+            time.sleep(60)
         handle = None  # 沙箱句柄，取消时需清理
+        if (task.audit_mode or "") == "large":
+            _log(db, task, "大项目模式：文件数不限制，任务已进入 heavy 队列；"
+                           "CodeQL/全量审计可能长时间占用资源，请避免与普通任务同时跑重任务。")
 
         def _cc() -> bool:
             """实时取消检查（供 Agent/全量审计长阶段使用，每次重读数据库）"""
@@ -264,7 +322,8 @@ def _process(task_id: int) -> None:
                 task.status = "sast"
                 _log(db, task, "对反编译产物执行 semgrep 扫描…")
                 try:
-                    vulns = sast_semgrep.run_sast(str(src), stacks)
+                    vulns = sast_semgrep.run_sast(str(src), stacks,
+                                                  log_fn=lambda m: _log(db, task, m))
                 except Exception as e:
                     _log(db, task, f"反编译产物扫描失败: {e}")
             else:
@@ -360,7 +419,8 @@ def _process(task_id: int) -> None:
             if techs:
                 _log(db, task, "执行 semgrep 静态扫描…")
                 try:
-                    vulns = sast_semgrep.run_sast(task.workspace_path, techs)
+                    vulns = sast_semgrep.run_sast(task.workspace_path, techs,
+                                                  log_fn=lambda m: _log(db, task, m))
                 except Exception as e:
                     task.status = "failed"
                     task.error_msg = f"静态扫描失败: {e}"
@@ -405,7 +465,7 @@ def _process(task_id: int) -> None:
                     dec = WORKSPACE_DIR / f"task_{task.id}" / "decompiled"
                     if dec.is_dir():
                         g_ws = str(dec)
-                eng_settings = agent_settings(db)
+                eng_settings = _task_settings(db, task)
                 gv = giants.run_giants(
                     g_ws, lambda m: _log(db, task, f"  [giants] {m}"),
                     task_name=task.filename, settings=eng_settings)
@@ -424,7 +484,8 @@ def _process(task_id: int) -> None:
                 if recovered_files:
                     _log(db, task, f"对 SourceMap 还原的 {len(recovered_files)} 个源码文件补跑 semgrep…")
                     rv = sast_semgrep.run_sast(
-                        str(recovered_dir), ["typescript", "javascript"])
+                        str(recovered_dir), ["typescript", "javascript"],
+                        log_fn=lambda m: _log(db, task, m))
                     if rv:
                         vulns = list(vulns) + rv
                         _log(db, task, f"SourceMap 还原源码补扫：新增 {len(rv)} 条")
@@ -469,9 +530,20 @@ def _process(task_id: int) -> None:
         # 续跑会重复研判并重复消耗 token）
         existing_rows = {(r.file_path, r.line, r.rule_id): r
                          for r in db.query(Vulnerability).filter(Vulnerability.task_id == task.id).all()}
+        existing_other_locs = {(r.file_path, int(r.line or 0)) for r in existing_rows.values()
+                               if "site-" not in str(r.rule_id or "")}
+        current_other_locs = {(v.get("file_path"), int(v.get("line") or 0)) for v in vulns
+                              if "site-" not in str(v.get("rule_id") or "")}
+        cross_engine_skip = 0
         vuln_rows = []
         new_cnt = 0
         for v in vulns:
+            rid = str(v.get("rule_id") or "")
+            ce = str(v.get("cross_engine") or "")
+            loc = (v.get("file_path"), int(v.get("line") or 0))
+            if "site-" in rid and ce.startswith("duplicate") and (loc in existing_other_locs or loc in current_other_locs):
+                cross_engine_skip += 1
+                continue
             key = (v["file_path"], v["line"], v["rule_id"])
             row = existing_rows.get(key)
             if row is None:
@@ -494,8 +566,10 @@ def _process(task_id: int) -> None:
                 new_cnt += 1
             vuln_rows.append((row, v))
         db.commit()
-        if new_cnt < len(vulns):
-            _log(db, task, f"续跑兼容：复用已有漏洞记录 {len(vulns) - new_cnt} 条（含研判结果），新落库 {new_cnt} 条")
+        if cross_engine_skip:
+            _log(db, task, f"cross_engine 去重：跳过同位置重复 {cross_engine_skip} 条（保留已有引擎结果）")
+        if new_cnt < len(vuln_rows):
+            _log(db, task, f"续跑兼容：复用已有漏洞记录 {len(vuln_rows) - new_cnt} 条（含研判结果），新落库 {new_cnt} 条")
 
         # 阶段 3：利用链引擎 v1（入口来自鉴权语义，sink 来自漏洞候选）
         try:
@@ -538,6 +612,9 @@ def _process(task_id: int) -> None:
         elif task.audit_mode == "static":
             handle = None
             _log(db, task, "仅静态扫描模式：跳过沙箱部署与 POC 验证")
+        elif not _sandbox_globally_enabled(db):
+            handle = None
+            _log(db, task, "沙箱功能已在「复现环境」页关闭：跳过沙箱部署与 POC 验证")
         else:
             task.status = "sandbox_deploying"
             _log(db, task, "部署 Docker 沙箱环境…")
@@ -552,24 +629,27 @@ def _process(task_id: int) -> None:
                     break
             if _maybe_cancel(db, task, handle):
                 return
-        # 6. POC 验证
-        task.status = "poc_verifying"
-        if handle is None:
-            if task.project_type not in ("apk", "image", "decompile", "driver"):
+        # 6. POC 验证（仅 static/驱动/APK/镜像/反编译不执行）
+        skip_poc = (task.audit_mode == "static"
+                    or not _sandbox_globally_enabled(db)
+                    or task.project_type in ("apk", "image", "decompile", "driver"))
+        if not skip_poc:
+            task.status = "poc_verifying"
+            if handle is None:
                 _log(db, task, "沙箱部署失败/不支持，跳过 POC 验证")
-        else:
-            try:
-                passed = poc.verify_all(vuln_rows, task.workspace_path, handle)
-                db.commit()
-                _log(db, task, f"POC 验证完成：{passed}/{min(len(vuln_rows), 8)} 条验证通过")
-            except Exception as e:
-                _log(db, task, f"POC 验证异常: {e}")
-            # 注意：容器保留到 Agent 深度研判结束再销毁（Agent 动态验证需要）
+            else:
+                try:
+                    passed = poc.verify_all(vuln_rows, task.workspace_path, handle)
+                    db.commit()
+                    _log(db, task, f"POC 验证完成：{passed}/{min(len(vuln_rows), 8)} 条验证通过")
+                except Exception as e:
+                    _log(db, task, f"POC 验证异常: {e}")
+                # 注意：容器保留到 Agent 深度研判结束再销毁（Agent 动态验证需要）
         if _maybe_cancel(db, task, handle):
             return
 
         # 6.5 Agent 深度研判（升级阶段 3）：配置了 LLM 才执行；优先 ERROR/WARNING，最多 agent_max_vulns 条
-        st = agent_settings(db)
+        st = _task_settings(db, task)
         if llm_cfg is None:
             _log(db, task, "未配置 LLM，跳过 Agent 深度研判")
         elif task.project_type == "driver":
@@ -613,13 +693,15 @@ def _process(task_id: int) -> None:
                 audit_ws = str(WORKSPACE_DIR / f"task_{task.id}" / "decompiled")
             audit_files = count_audit_files(audit_ws)
             max_files = int(st["full_audit_max_files"])
-            if audit_files > max_files:
+            if max_files > 0 and audit_files > max_files:
                 _log(db, task, f"全量审计已熔断：工作区 {audit_files} 个文件 > 上限 {max_files}。"
                                f"实测千文件级仓库全量审计产出极低且消耗百万级 token，本次跳过（0 token）。"
-                               f"如确需执行，可在平台设置调高 full_audit_max_files。")
+                               f"如确需执行，可在平台设置把 full_audit_max_files 调高或设为 0（不限制）。")
             else:
                 task.status = "agent_full_audit"
-                _log(db, task, f"启动 Agent 全量审计（工作区 {audit_files} 个文件，熔断阈值 {max_files}；"
+                limit_text = "不限制" if max_files <= 0 else str(max_files)
+                _log(db, task, f"启动 Agent 全量审计（工作区 {audit_files} 个文件，文件上限 {limit_text}；"
+                               f"每轮 token 预算 {st['full_audit_token_per_round']}；"
                                f"自主遍历全部源码，不依赖静态规则命中）…")
                 try:
                     existing = [(r.file_path, r.line, r.rule_id)
@@ -639,10 +721,12 @@ def _process(task_id: int) -> None:
         if _maybe_cancel(db, task, handle):
             return
 
-        # 沙箱生命周期终点：web 任务保留容器供"手工 POC 验证"使用（删除任务时销毁）；
-        # 其余类型立即销毁。
+        # 沙箱生命周期终点：full web 任务保留容器供手工 POC；static/poc 立即销毁，
+        # 避免批量 POC 任务把 100+ 容器堆在机器上。
         if handle is not None:
-            if task.project_type == "web":
+            retain = (task.project_type == "web"
+                      and task.audit_mode not in ("static", "poc"))
+            if retain:
                 try:
                     task.sandbox_cid = handle.container.id
                     task.sandbox_port = handle.internal_port
@@ -721,12 +805,12 @@ def recover_pending_tasks() -> int:
     return n
 
 
-def _worker_loop() -> None:
-    """单 worker 串行消费任务，任何异常不得导致线程退出。"""
+def _worker_loop(work_queue) -> None:
+    """独立 worker 串行消费各自队列，任何异常不得导致线程退出。"""
     log = logging.getLogger("audit-platform.worker")
     while True:
         try:
-            _, _, task_id = task_queue.get()
+            _, _, task_id = work_queue.get()
             _process(task_id)
             # 兜底：_process 返回但任务未到终态（会话被打坏导致兜底自身失败时发生），
             # 用新会话强制标记 failed，防止任务永久卡在中间状态
@@ -748,21 +832,41 @@ def _worker_loop() -> None:
                 pass
 
 
-def start_worker() -> threading.Thread:
-    t = threading.Thread(target=_worker_loop, name="task-worker", daemon=True)
-    t.start()
-    return t
+def start_worker() -> list[threading.Thread]:
+    """启动分析 / 沙箱 / heavy worker，互不阻塞。
+    分析队列并发数由 ANALYSIS_WORKERS 控制（默认 1；大内存机器可开 2–3 提速，
+    CodeQL 自身还有 codeql_min_free_mb 闸门兜底，不会把内存吃穿）。"""
+    threads = [
+        threading.Thread(target=_worker_loop, args=(analysis_queue,),
+                         name=f"analysis-worker-{i}", daemon=True)
+        for i in range(max(1, int(os.getenv("ANALYSIS_WORKERS", "1"))))
+    ] + [
+        threading.Thread(target=_worker_loop, args=(sandbox_queue,),
+                         name="sandbox-worker", daemon=True),
+        threading.Thread(target=_worker_loop, args=(heavy_queue,),
+                         name="heavy-worker", daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    return threads
 
 
 def enqueue(task_id: int) -> None:
-    """阶段 0.4：poc（动态验证）优先于 full，full 优先于 static；同优先级按入队顺序。"""
+    """poc 进沙箱队列；large 进 heavy 队列；full/static 进分析队列（full 优先）。"""
     priority = 2
+    mode = ""
     try:
         db = SessionLocal()
         t = db.get(Task, task_id)
         mode = (t.audit_mode or "") if t is not None else ""
-        priority = 0 if mode == "poc" else (1 if mode == "full" else 2)
         db.close()
     except Exception:
-        priority = 2
-    task_queue.put((priority, next(_queue_seq), int(task_id)))
+        mode = ""
+    if mode == "poc":
+        sandbox_queue.put((0, next(_queue_seq), int(task_id)))
+        return
+    if mode == "large":
+        heavy_queue.put((0, next(_queue_seq), int(task_id)))
+        return
+    priority = 1 if mode == "full" else 2
+    analysis_queue.put((priority, next(_queue_seq), int(task_id)))

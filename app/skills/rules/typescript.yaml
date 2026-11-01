@@ -1,0 +1,32 @@
+rules:
+- id: typescript-eval
+  message: 使用 eval 动态执行代码
+  severity: ERROR
+  languages: [typescript]
+  pattern: "eval(...)"
+- id: typescript-command-injection
+  message: 子进程命令执行，存在命令注入风险
+  severity: ERROR
+  languages: [typescript]
+  pattern-either:
+    - pattern: exec($CMD + $X, ...)
+    - pattern: execSync($CMD + $X)
+- id: typescript-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages: [typescript]
+  pattern-regex: '(?i)(password|secret|api_key|apikey)\s*[:=]\s*"[^"\n]{6,}"'
+- id: typescript-ssrf
+  message: 拼接 URL 发起请求，存在 SSRF 风险
+  severity: WARNING
+  languages: [typescript]
+  pattern-either:
+    - pattern: axios.get($BASE + $X)
+    - pattern: fetch($BASE + $X)
+- id: typescript-path-traversal
+  message: 路径拼接未校验，存在路径穿越风险
+  severity: WARNING
+  languages: [typescript]
+  pattern-either:
+    - pattern: fs.readFileSync($BASE + $INPUT)
+    - pattern: path.join($BASE, $INPUT)

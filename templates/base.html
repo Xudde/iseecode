@@ -15,7 +15,7 @@
   document.documentElement.setAttribute('data-theme', t);
 })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
 <div class="layout">
@@ -26,7 +26,7 @@
       </div>
       <div>
         <div class="name">源码审计平台</div>
-        <div class="sub">Source Audit v4.8</div>
+        <div class="sub">Source Audit v4.9</div>
       </div>
     </div>
     <nav class="side-nav">
@@ -62,6 +62,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
         引擎配置
       </a>
+      <a href="/labs" {% if nav == 'labs' %}class="active"{% endif %}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.5L4.6 18a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3L14 9.5V2"/><path d="M8.5 2h7"/><path d="M7 15h10"/></svg>
+        复现环境
+      </a>
       <a href="/config" {% if nav == 'config' %}class="active"{% endif %}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         平台设置
@@ -74,7 +78,7 @@
         <span class="t-light">切换白天模式</span>
         <span class="t-dark">切换夜间模式</span>
       </button>
-      <div><span class="dot"></span>服务运行中</div>
+      <div id="side-status"><span class="dot" id="side-dot"></span><span id="side-status-text">服务运行中</span></div>
       <div>流水线：semgrep → LLM 研判<br>→ 沙箱 POC → Agent 全量审计</div>
     </div>
   </aside>
@@ -117,6 +121,14 @@ window.SAP = {
   esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  },
+  multiline(s) {
+    // 保留已有换行；把“1) 2) 3)”/“• -”这类内联分点拆成独立行
+    let t = this.esc(s);
+    t = t.replace(/([^\n])\s+(?=(?:\d{1,2}[\.\)、]\s|[•·]\s?|[-*]\s))/g, '$1\n');
+    t = t.replace(/([^\n])\s+(?=[一二三四五六七八九十]+、)/g, '$1\n');
+    t = t.replace(/([；;])\s*(?=(?:\d{1,2}[\.\)、]\s|[一二三四五六七八九十]+、|[•·]))/g, '$1\n');
+    return t;
   },
   statusPill(st) {
     const m = this.STATUS[st] || { label: st, tone: 'dim' };
@@ -215,6 +227,14 @@ window.SAP = {
     const sel = el.querySelector('.pager-size');
     if (sel) sel.addEventListener('change', () => onChange(1, Number(sel.value)));
     return page;
+  },
+
+  /* 侧栏服务状态：接口失败时不能继续显示“服务运行中” */
+  setServiceStatus(ok, text) {
+    const dot = document.getElementById('side-dot');
+    const label = document.getElementById('side-status-text');
+    if (dot) dot.classList.toggle('bad', !ok);
+    if (label) label.textContent = text || (ok ? '服务运行中' : '服务连接失败');
   }
 };
 </script>

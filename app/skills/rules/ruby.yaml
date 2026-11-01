@@ -1,0 +1,37 @@
+rules:
+- id: ruby-sql-injection
+  message: SQL 拼接注入风险
+  severity: ERROR
+  languages: [ruby]
+  pattern-either:
+    - pattern: '$MODEL.where("... #{$X} ...")'
+    - pattern: $DB.execute($SQL + $X)
+    - pattern: '$DB.execute("... #{$X} ...")'
+- id: ruby-command-injection
+  message: 反引号/system 命令注入风险
+  severity: ERROR
+  languages: [ruby]
+  pattern-either:
+    - pattern: system($CMD + $X)
+    - pattern: exec($CMD + $X)
+    - pattern: IO.popen($CMD + $X)
+- id: ruby-eval
+  message: 使用 eval 动态执行代码
+  severity: ERROR
+  languages: [ruby]
+  pattern: "eval(...)"
+- id: ruby-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages: [ruby]
+  pattern-regex: '(?i)(password|secret|api_key)\s*[:=]\s*"[^"\n]{6,}"'
+- id: ruby-marshal-deserialize
+  message: Marshal.load 反序列化不可信数据，存在 RCE 风险
+  severity: ERROR
+  languages: [ruby]
+  pattern: Marshal.load(...)
+- id: ruby-erb-injection
+  message: ERB 模板注入风险
+  severity: WARNING
+  languages: [ruby]
+  pattern: ERB.new(...).result(...)

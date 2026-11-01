@@ -1,0 +1,72 @@
+# Java 漏洞规则（≥5 条）
+rules:
+  - id: java-sql-concat
+    languages: [java]
+    severity: ERROR
+    message: SQL 注入：查询语句字符串直接拼接（反编译/无污点场景也可命中）
+    pattern-either:
+      - pattern: $X.executeQuery($A + $B)
+      - pattern: $X.execute($A + $B)
+      - pattern: $X.executeUpdate($A + $B)
+      - pattern: $X.prepareStatement($A + $B)
+  - id: java-command-concat
+    languages: [java]
+    severity: ERROR
+    message: 命令注入：exec 参数字符串拼接
+    pattern: Runtime.getRuntime().exec($A + $B)
+  - id: java-sql-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: SQL 注入：用户输入直接拼接进 Statement 执行
+    pattern-sources:
+      - pattern: $REQ.getParameter(...)
+      - pattern: (HttpServletRequest $R).getParameter(...)
+    pattern-sinks:
+      - pattern: $STMT.executeQuery($SQL)
+      - pattern: $STMT.execute($SQL)
+      - pattern: $STMT.executeUpdate($SQL)
+  - id: java-command-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: 命令注入：用户输入进入 Runtime.exec / ProcessBuilder
+    pattern-sources:
+      - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - pattern: Runtime.getRuntime().exec($CMD)
+      - pattern: new ProcessBuilder(..., $CMD, ...)
+  - id: java-deserialization
+    languages: [java]
+    severity: ERROR
+    message: 不安全反序列化：ObjectInputStream 反序列化不可信数据
+    patterns:
+      - pattern: (ObjectInputStream $O).readObject()
+  - id: java-xxe
+    languages: [java]
+    severity: WARNING
+    message: XXE：XML 解析器未禁用外部实体
+    patterns:
+      - pattern-either:
+          - pattern: $FACTORY.newDocumentBuilder()
+          - pattern: (SAXParser $P).parse(...)
+  - id: java-ssrf
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: SSRF：用户输入直接作为请求 URL
+    pattern-sources:
+      - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - pattern: new URL($U).openConnection(...)
+      - pattern: new URL($U).openStream()
+  - id: java-xss-servlet
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: XSS：用户输入未编码直接写入响应
+    pattern-sources:
+      - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - pattern: $RESP.getWriter().print($X)
+      - pattern: $RESP.getWriter().write($X)

@@ -23,6 +23,12 @@ AGENT_SETTING_DEFAULTS = {
     "engine_authz": 1,                    # 未授权接口清单
     "codeql_ram_mb": 4096,                # CodeQL 分析内存上限
     "codeql_threads": 2,                  # CodeQL 分析线程
+    "codeql_max_files": 10000,            # CodeQL 目标语言源码文件上限；0=不限制
+    "codeql_db_timeout": 1800,            # CodeQL 建库超时（秒）；0=不限制
+    "codeql_analyze_timeout": 1800,       # CodeQL 查询超时（秒）；0=不限制
+    "codeql_min_free_mb": 1024,           # CodeQL 启动前保留的系统可用内存（MB）；0=不检查
+    "codeql_java_buildless": 1,           # Java 用 buildless 手动建库，跳过 Gradle/Maven autobuild
+    "codeql_high_value": 0,               # Java 只用高价值 CWE 子集（省内存）；0=全量 suite
 }
 
 SETTING_LABELS = {
@@ -43,6 +49,12 @@ SETTING_LABELS = {
     "engine_authz": "未授权接口清单",
     "codeql_ram_mb": "CodeQL 内存上限（MB）",
     "codeql_threads": "CodeQL 线程数",
+    "codeql_max_files": "CodeQL 源码文件上限（0=不限制）",
+    "codeql_db_timeout": "CodeQL 建库超时（秒，0=不限制）",
+    "codeql_analyze_timeout": "CodeQL 查询超时（秒，0=不限制）",
+    "codeql_min_free_mb": "CodeQL 启动保留内存（MB）",
+    "codeql_java_buildless": "Java buildless（跳过 Gradle/Maven）",
+    "codeql_high_value": "高价值 CWE 子集（省内存）",
 }
 
 

@@ -1,0 +1,51 @@
+rules:
+  - id: jeecg-audit.shiro-anon-whitelist
+    languages: [java]
+    severity: WARNING
+    message: "Shiro 过滤链匿名放行(anon)：未认证用户可直接访问该路径"
+    pattern: $MAP.put($PATH, "anon")
+
+  - id: jeecg-audit.shiro-anon-high-risk
+    languages: [java]
+    severity: ERROR
+    message: "高危组件路径匿名放行（报表/中间件/监控控制台）：$PATH"
+    patterns:
+      - pattern: $MAP.put($PATH, "anon")
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: "(?i).*(jmreport|druid|actuator|swagger|api-docs|knife4j|doc\\.html|nacos|monitor|xxl|eureka|gateway).*"
+
+  - id: jeecg-audit.commented-permission-annotation
+    languages: [generic]
+    paths:
+      include:
+        - "*.java"
+    severity: WARNING
+    message: "权限注解 @RequiresPermissions 被注释，接口功能级鉴权疑似缺失"
+    pattern-regex: "//\\s*@RequiresPermissions\\s*\\("
+
+  - id: jeecg-audit.hardcoded-signing-secret
+    languages: [generic]
+    paths:
+      include:
+        - "*.yml"
+        - "*.yaml"
+        - "*.properties"
+    severity: ERROR
+    message: "配置文件硬编码签名/加密密钥"
+    pattern-regex: "(?i)(signatureSecret|signKey|secretKey|jwtSecret|jwt[._-]secret|aes[._-]key|token[._-]secret)\\s*[:=]\\s*[\"']?[A-Za-z0-9+/=]{12,}"
+
+  - id: jeecg-audit.jimureport-vulnerable-version
+    languages: [generic]
+    paths:
+      include:
+        - "pom.xml"
+    severity: ERROR
+    message: "积木报表 jimureport 依赖版本过旧（<1.8.1），存在未授权 SQL注入/SSTI 利用链"
+    pattern-regex: "<jimureport[^>]*\\.version>\\s*1\\.[0-7]\\."
+
+  - id: jeecg-audit.default-nacos-secret
+    languages: [generic]
+    severity: ERROR
+    message: "Nacos 默认/硬编码鉴权密钥"
+    pattern-regex: "SecretKey0123456789"

@@ -31,6 +31,16 @@
     <input type="number" id="c-codeql_ram_mb" min="512" step="256">
     <label class="f-label"><b>分析线程</b> codeql_threads <span class="muted">— 4 核建议 1，8 核可 2</span></label>
     <input type="number" id="c-codeql_threads" min="1" max="8">
+    <label class="f-label"><b>源码文件上限</b> codeql_max_files <span class="muted">— 只计目标语言源码；0=不限制</span></label>
+    <input type="number" id="c-codeql_max_files" min="0" step="1000">
+    <label class="f-label"><b>建库超时（秒）</b> codeql_db_timeout <span class="muted">— 0=不限制</span></label>
+    <input type="number" id="c-codeql_db_timeout" min="0" step="60">
+    <label class="f-label"><b>查询超时（秒）</b> codeql_analyze_timeout <span class="muted">— 0=不限制</span></label>
+    <input type="number" id="c-codeql_analyze_timeout" min="0" step="60">
+    <label class="f-label"><b>启动保留内存（MB）</b> codeql_min_free_mb <span class="muted">— 低于该值不启动 CodeQL；0=不检查</span></label>
+    <input type="number" id="c-codeql_min_free_mb" min="0" step="256">
+    <label class="f-label"><input type="checkbox" id="c-codeql_java_buildless"> Java buildless <span class="muted">— 跳过 Gradle/Maven autobuild，适合依赖不可达的大项目</span></label>
+    <label class="f-label"><input type="checkbox" id="c-codeql_high_value"> 高价值 CWE 子集 <span class="muted">— 只跑注入/反序列化/XXE/SSRF 等 21 条查询，省内存</span></label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
       <button class="btn" type="button" data-ram="2048" data-threads="1">低配 4C/8G</button>
       <button class="btn" type="button" data-ram="4096" data-threads="2">均衡 16G</button>
@@ -46,7 +56,7 @@
 
 <div class="card">
   <div class="card-title">Engine 注册表 <span class="hint">按 order 执行；自定义 Semgrep 规则放 data/rules/*.yaml</span></div>
-  <div class="tbl-wrap" style="max-height:300px;overflow:auto">
+  <div class="tbl-wrap" style="max-height:520px;overflow:auto">
     <table class="tbl">
       <thead><tr><th style="width:60px">顺序</th><th style="width:220px">引擎</th><th style="width:150px">设置项</th><th style="width:90px">需 Docker</th><th style="width:70px">状态</th><th>说明</th></tr></thead>
       <tbody id="engine-reg-body"></tbody>
@@ -71,6 +81,10 @@ async function load() {
     });
     document.getElementById('c-codeql_ram_mb').value = c.codeql_ram_mb;
     document.getElementById('c-codeql_threads').value = c.codeql_threads;
+    ['codeql_max_files', 'codeql_db_timeout', 'codeql_analyze_timeout', 'codeql_min_free_mb']
+      .forEach(k => document.getElementById('c-' + k).value = c[k]);
+    document.getElementById('c-codeql_java_buildless').checked = String(c.codeql_java_buildless) === '1';
+    document.getElementById('c-codeql_high_value').checked = String(c.codeql_high_value) === '1';
   } catch (e) { SAP.toast('读取引擎配置失败：' + e.message, 'err'); }
 }
 
@@ -87,10 +101,23 @@ document.getElementById('btn-save-engines').addEventListener('click', async () =
   FLAGS.forEach(k => body[k] = document.getElementById('c-' + k).checked ? 1 : 0);
   const ram = parseInt(document.getElementById('c-codeql_ram_mb').value, 10);
   const threads = parseInt(document.getElementById('c-codeql_threads').value, 10);
+  const maxFiles = parseInt(document.getElementById('c-codeql_max_files').value, 10);
+  const dbTimeout = parseInt(document.getElementById('c-codeql_db_timeout').value, 10);
+  const analyzeTimeout = parseInt(document.getElementById('c-codeql_analyze_timeout').value, 10);
+  const minFree = parseInt(document.getElementById('c-codeql_min_free_mb').value, 10);
   if (!Number.isInteger(ram) || ram < 512) { SAP.toast('CodeQL 内存必须 ≥512MB', 'err'); return; }
   if (!Number.isInteger(threads) || threads < 1 || threads > 8) { SAP.toast('CodeQL 线程必须在 1–8', 'err'); return; }
+  if (![maxFiles, dbTimeout, analyzeTimeout, minFree].every(n => Number.isInteger(n) && n >= 0)) {
+    SAP.toast('CodeQL 文件上限/超时/保留内存必须 ≥0', 'err'); return;
+  }
   body.codeql_ram_mb = ram;
   body.codeql_threads = threads;
+  body.codeql_max_files = maxFiles;
+  body.codeql_db_timeout = dbTimeout;
+  body.codeql_analyze_timeout = analyzeTimeout;
+  body.codeql_min_free_mb = minFree;
+  body.codeql_java_buildless = document.getElementById('c-codeql_java_buildless').checked ? 1 : 0;
+  body.codeql_high_value = document.getElementById('c-codeql_high_value').checked ? 1 : 0;
   try {
     await SAP.api('/api/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

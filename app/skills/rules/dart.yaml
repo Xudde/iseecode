@@ -1,0 +1,39 @@
+rules:
+- id: dart-command-injection
+  message: Process 命令执行，存在命令注入风险
+  severity: ERROR
+  languages:
+  - dart
+  pattern-either:
+  - pattern: Process.run($CMD + $X, ...)
+  - pattern: Process.start($CMD + $X, ...)
+- id: dart-eval-injection
+  message: 动态表达式执行风险
+  severity: WARNING
+  languages:
+  - dart
+  pattern-regex: (?i)(eval|exec)\s*\(
+- id: dart-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages:
+  - dart
+  pattern-regex: (?i)(password|secret|api_key)\s*=\s*'[^'\n]{6,}'
+- id: dart-insecure-http
+  message: 使用不安全的 HTTP 请求
+  severity: WARNING
+  languages:
+  - dart
+  pattern-regex: '"http://[^"]+"'
+- id: dart-raw-sql
+  message: rawQuery 字符串拼接 SQL 注入风险
+  severity: ERROR
+  languages:
+  - dart
+  pattern: $DB.rawQuery($SQL + $X)
+- id: dart-disable-cert
+  message: 禁用证书校验，存在中间人攻击风险
+  severity: ERROR
+  languages:
+  - dart
+  pattern-regex: badCertificateCallback\s*=

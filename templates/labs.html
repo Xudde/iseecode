@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% set nav = 'labs' %}
+{% block title %}复现环境 · 源码自动化审计平台{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <div class="page-title">复现环境 / 沙箱</div>
+    <div class="page-sub">手工复现用的 lab 容器起停、任务沙箱保留情况，以及"什么模式会起沙箱"的策略说明</div>
+  </div>
+  <div>
+    <button class="btn" id="btn-refresh">刷新</button>
+    <label class="f-label" style="display:inline-flex;align-items:center;gap:6px">
+      <input type="checkbox" id="auto-refresh" checked> 10 秒自动刷新
+    </label>
+  </div>
+</div>
+
+<div class="form-row">
+  <div class="card">
+    <div class="card-title">沙箱总开关 <span class="hint">关掉后新任务不再部署 Docker 沙箱，也不做 POC 验证</span></div>
+    <label class="f-label">
+      <input type="checkbox" id="c-sandbox-enabled"> 启用沙箱部署与 POC 验证
+    </label>
+    <div class="tip-box" id="sandbox-note">读取中…</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">运行参数 <span class="hint">来自 start.sh 的环境变量</span></div>
+    <div id="env-box" class="muted">读取中…</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">复现 lab 容器 <span class="hint">带 iseecode.lab 标签或名字以 -lab 结尾；不会被沙箱清理 cron 回收</span></div>
+  <table class="tbl" id="lab-table">
+    <thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>健康</th><th>端口</th><th>compose 目录</th><th>操作</th></tr></thead>
+    <tbody><tr><td colspan="7" class="muted">读取中…</td></tr></tbody>
+  </table>
+  <div class="tip-box" style="margin-top:10px">
+    起停只作用于 lab 容器；平台沙箱、MobSF、egress-proxy 不能从这里操作（接口会拒绝）。
+    新 lab 请打标签 <code>iseecode.lab: "true"</code> 或把容器名写成 <code>xxx-lab</code>，否则 20 分钟后会被清理 cron 当泄漏沙箱删掉。
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">已复现 lab 登记 <span class="hint">容器删掉也不丢记录：POC、报告、部署文件与数据目录都在</span></div>
+  <table class="tbl" id="hist-table">
+    <thead><tr><th>容器</th><th>复现内容</th><th>当前状态</th><th>端口</th><th>部署目录</th><th>重新起</th><th>证据目录</th></tr></thead>
+    <tbody><tr><td colspan="7" class="muted">读取中…</td></tr></tbody>
+  </table>
+  <div class="tip-box" style="margin-top:10px">
+    状态为 <b>removed</b> 表示容器已删除（复现完成后按需要清理），此时页面上的起停按钮无效，
+    要在服务器上执行 <code>start_lab.sh</code> 重新部署；端口列空不代表漏洞不存在。
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">任务保留的沙箱 <span class="hint">仅 full / large 的 web 任务完成后保留，供"手动验证"重放</span></div>
+  <table class="tbl" id="sb-table">
+    <thead><tr><th>任务</th><th>项目</th><th>模式</th><th>容器</th><th>端口</th><th>是否还活着</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted">读取中…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title">沙箱策略 <span class="hint">与 app/queue_worker.py 的实际分支一致</span></div>
+  <table class="tbl" id="policy-table">
+    <thead><tr><th>审计模式</th><th>沙箱</th><th>POC 验证</th><th>容器处理</th><th>CodeQL</th><th>LLM / Agent</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div id="policy-extra" class="muted" style="margin-top:10px"></div>
+</div>
+
+<script>
+let timer = null;
+
+function pill(state) {
+  const map = { running: 'ok', exited: 'bad', created: 'dim', restarting: 'run', paused: 'dim', removing: 'dim', removed: 'dim' };
+  return `<span class="pill pill-${map[state] || 'dim'}">${SAP.esc(state || '-')}</span>`;
+}
+
+async function load() {
+  let d;
+  try { d = await SAP.api('/api/labs'); }
+  catch (e) { SAP.toast('读取失败：' + e.message, 'err'); return; }
+
+  const en = document.getElementById('c-sandbox-enabled');
+  en.checked = !!d.sandbox_enabled;
+  document.getElementById('sandbox-note').innerHTML = d.sandbox_enabled
+    ? '当前<b>启用</b>：poc / full / large 任务会部署沙箱并做 POC 验证（apk/镜像/反编译/驱动任务除外）。'
+    : '当前<b>已关闭</b>：新任务跳过沙箱部署与 POC 验证，只出静态结果；已保留的容器不受影响。';
+
+  const labs = d.labs || [];
+  document.querySelector('#lab-table tbody').innerHTML = labs.length ? labs.map(x => `
+    <tr>
+      <td><b>${SAP.esc(x.name)}</b></td>
+      <td class="muted">${SAP.esc(x.image || '-')}</td>
+      <td>${pill(x.state)}</td>
+      <td class="muted">${SAP.esc(x.health || '-')}</td>
+      <td class="muted">${SAP.esc((x.ports || []).join(', ') || '-')}</td>
+      <td class="muted">${SAP.esc(x.compose_dir || '-')}</td>
+      <td>
+        ${x.state === 'running'
+          ? `<button class="btn btn-sm" data-act="stop" data-n="${SAP.esc(x.name)}">停止</button>
+             <button class="btn btn-sm" data-act="restart" data-n="${SAP.esc(x.name)}">重启</button>`
+          : `<button class="btn btn-sm btn-primary" data-act="start" data-n="${SAP.esc(x.name)}">启动</button>`}
+      </td>
+    </tr>`).join('')
+    : '<tr><td colspan="7" class="muted">当前没有活着的 lab 容器。已复现过的记录见下面「已复现 lab 登记」，重新起用 <code>/opt/labs/deploy/&lt;项目&gt;/start_lab.sh</code>。</td></tr>';
+
+  const hist = d.history || [];
+  document.querySelector('#hist-table tbody').innerHTML = hist.length ? hist.map(x => `
+    <tr>
+      <td><b>${SAP.esc(x.name)}</b></td>
+      <td>${SAP.esc(x.title || '')}</td>
+      <td>${pill(x.state)}${x.health ? ` <span class="muted">${SAP.esc(x.health)}</span>` : ''}</td>
+      <td class="muted">${SAP.esc((x.ports || []).join(', ') || (x.port ? `（曾 ${x.port}）` : '-'))}</td>
+      <td class="muted">${SAP.esc(x.dir || '-')}${x.dir ? (x.dir_exists ? '' : ' <span class="pill pill-bad">目录已不在</span>') : ''}</td>
+      <td class="muted">${x.start_cmd ? `<code>${SAP.esc(x.start_cmd)}</code>` : '-'}</td>
+      <td class="muted">${SAP.esc(x.evidence || '-')}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="7" class="muted">登记处是空的（app/routes/api_labs.py 的 LAB_REGISTRY）。新 lab 复现成功后建议登记一条。</td></tr>';
+
+  const sb = d.sandboxes || [];
+  document.querySelector('#sb-table tbody').innerHTML = sb.length ? sb.map(x => `
+    <tr>
+      <td><a href="/tasks/${x.task_id}">#${x.task_id}</a></td>
+      <td class="muted">${SAP.esc(x.filename || '')}</td>
+      <td class="muted">${SAP.esc(x.audit_mode || '')}</td>
+      <td class="muted">${SAP.esc(x.cid || '-')}</td>
+      <td class="muted">${x.port || '-'}</td>
+      <td>${x.alive ? '<span class="pill pill-ok">存活</span>' : '<span class="pill pill-bad">已销毁</span>'}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="6" class="muted">当前没有任务保留沙箱（poc 模式验证后即销毁，属正常）。</td></tr>';
+
+  const p = d.policy || {};
+  document.querySelector('#policy-table tbody').innerHTML = Object.entries(p.modes || {}).map(([k, v]) => `
+    <tr><td><b>${k}</b></td><td>${v['沙箱']}</td><td>${v['POC']}</td><td>${v['容器']}</td>
+        <td>${v['CodeQL']}</td><td>${v['LLM/Agent']}</td></tr>`).join('');
+  const cl = p.cleanup_cron || {};
+  document.getElementById('policy-extra').innerHTML =
+    `不部署沙箱的项目类型：${(p.no_sandbox_project_types || []).join(' / ')}<br>` +
+    `清理 cron：<code>${cl.schedule || ''}</code>，存活超过 ${cl.min_age_min || ''} 分钟且不属于活跃任务的平台镜像容器会被回收` +
+    `（保留：${(cl.keep || []).join(' / ')}；豁免：${cl.lab_exemption || ''}）<br>` +
+    `不回收的镜像：${(cl.images || []).join(' / ')}`;
+
+  const env = p.env || {};
+  const disk = (p.disk_free_gb === null || p.disk_free_gb === undefined) ? '未知' : `${p.disk_free_gb}G`;
+  document.getElementById('env-box').innerHTML =
+    `静态队列并发 ANALYSIS_WORKERS = <b>${env.ANALYSIS_WORKERS || '1'}</b><br>` +
+    `磁盘刹车 AUDIT_MIN_FREE_GB = <b>${env.AUDIT_MIN_FREE_GB || '4'}</b>（空闲低于该值 worker 等待）<br>` +
+    `根盘剩余：<b>${disk}</b>` + (d.docker_error ? `<br><span class="pill pill-bad">docker 异常</span> ${SAP.esc(d.docker_error)}` : '');
+}
+
+document.getElementById('lab-table').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    const d = await SAP.api(`/api/labs/${encodeURIComponent(b.dataset.n)}/${b.dataset.act}`, { method: 'POST' });
+    SAP.toast(`${d.name} → ${d.state}`, 'ok');
+    load();
+  } catch (err) { SAP.toast('操作失败：' + err.message, 'err'); b.disabled = false; }
+});
+
+document.getElementById('c-sandbox-enabled').addEventListener('change', async e => {
+  try {
+    await SAP.api('/api/labs/sandbox_enabled?value=' + (e.target.checked ? 1 : 0), { method: 'POST' });
+    SAP.toast(e.target.checked ? '沙箱已启用（对新任务生效）' : '沙箱已关闭（对新任务生效）', 'ok');
+    load();
+  } catch (err) { SAP.toast('保存失败：' + err.message, 'err'); e.target.checked = !e.target.checked; }
+});
+
+function setAuto(on) {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (on) timer = setInterval(load, 10000);
+}
+document.getElementById('auto-refresh').addEventListener('change', e => setAuto(e.target.checked));
+document.getElementById('btn-refresh').addEventListener('click', load);
+setAuto(true);
+load();
+</script>
+{% endblock %}

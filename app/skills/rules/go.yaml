@@ -1,0 +1,67 @@
+# Go 漏洞规则（≥5 条，替代已废弃的 --config auto）
+rules:
+  - id: go-sql-injection
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: SQL 注入：用户输入拼接进 SQL 执行
+    pattern-sources:
+      - pattern: $R.URL.Query().Get(...)
+      - pattern: $R.FormValue(...)
+      - pattern: $R.PostFormValue(...)
+    pattern-sinks:
+      - pattern: $DB.Query($Q, ...)
+      - pattern: $DB.Exec($Q, ...)
+      - pattern: $DB.QueryRow($Q, ...)
+  - id: go-command-injection
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: 命令注入：用户输入进入 exec.Command
+    pattern-sources:
+      - pattern: $R.URL.Query().Get(...)
+      - pattern: $R.FormValue(...)
+    pattern-sinks:
+      - pattern: exec.Command($CMD, ...)
+      - pattern: exec.CommandContext($CTX, $CMD, ...)
+  - id: go-unsafe-tempfile
+    languages: [go]
+    severity: WARNING
+    message: 竞态风险：ioutil.TempFile 使用固定路径模式易被抢占（TOCTOU）
+    patterns:
+      - pattern: 'ioutil.TempFile("", ...)'
+  - id: go-weak-crypto
+    languages: [go]
+    severity: WARNING
+    message: 弱加密：使用 MD5/SHA1/DES 等已不安全的算法处理敏感数据
+    patterns:
+      - pattern-either:
+          - pattern: md5.New()
+          - pattern: sha1.New()
+          - pattern: des.NewCipher(...)
+  - id: go-tls-skip-verify
+    languages: [go]
+    severity: ERROR
+    message: TLS 校验禁用：InsecureSkipVerify=true 可被中间人攻击
+    patterns:
+      - pattern: 'InsecureSkipVerify: true'
+  - id: go-hardcoded-secret
+    languages: [go]
+    severity: WARNING
+    message: 硬编码密钥：源码中写死敏感凭据
+    patterns:
+      - pattern: '$KEY = "..."'
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(secret|password|apikey|api_key|token).*
+  - id: go-path-traversal
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: 路径穿越：用户输入直接拼接文件路径读取
+    pattern-sources:
+      - pattern: $R.URL.Query().Get(...)
+    pattern-sinks:
+      - pattern: ioutil.ReadFile($P)
+      - pattern: os.ReadFile($P)
+      - pattern: os.Open($P)

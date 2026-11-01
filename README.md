@@ -10,10 +10,12 @@
 
 ISeeCode 是一个自托管的源码审计平台，面向 SRC/CVE 研究和开源项目审计。它把 semgrep、gitleaks、trivy、CodeQL、JS 情报、OSV 等能力接到同一套任务流水线中，并用 Docker 沙箱尝试复现候选问题。
 
-- **多引擎静态扫描**：semgrep 规则包 + gitleaks 密钥 + trivy 配置/依赖 CVE + CodeQL 数据流 + JS 端点/密钥情报 + OSV 自身版本 CVE
+- **多引擎静态扫描**：semgrep 多语言内置规则（Go/Java/Python/JS/TS/PHP/Ruby/Rust/C/C++/C#/Kotlin/Swift/Dart/Scala/HTML）+ 定向/开源规则包 + gitleaks 密钥 + trivy 配置/依赖 CVE + CodeQL 数据流 + JS 端点/密钥情报 + OSV 自身版本 CVE
 - **沙箱 POC 验证**：Python/Node/PHP/Go/Java 项目在受限容器内启动；能验证就写 `poc_verified`，验证不了就如实报 `blocked`，不伪造 0day
 - **Agent 深挖（可选）**：兼容 OpenAI 协议的模型可用四阶段 ReAct（triage → exploit → verify → judge）；没有 API key 时纯规则/沙箱流程仍可运行
 - **审计与 RBAC**：变更类 API、登录和 Agent 调用写入 `audit_events`；支持 admin/auditor/viewer 三档令牌
+- **路由与鉴权清单**：Java 类级 `@RequestMapping`、JS 变量/多行 Express、Django URLconf，统一路径归一化，减少前端文件误报
+- **依赖 CVE**：`tools/scan_dependencies.py` 递归解析 Maven `pom.xml`、npm `package.json`、`composer.lock`、`requirements*.txt`，走 OSV querybatch
 - **CLI**：`list / status / wait / submit / report / vulns / audit / stats`
 - **自定义规则**：把 Semgrep YAML 放进 `data/rules/`，新任务自动加载；Engine 注册表可在 `/engines` 查看
 - **工程安全**：沙箱 cap-drop ALL（保留 NET_BIND_SERVICE）、no-new-privileges、只读根、端口只绑 127.0.0.1；依赖阶段走受控 egress 白名单代理，装完不再直连外网
@@ -27,13 +29,17 @@ ISeeCode 是一个自托管的源码审计平台，面向 SRC/CVE 研究和开�
 |---|---|
 | ![dashboard](docs/screenshots/02_dashboard.png) | ![list](docs/screenshots/01_task_list.png) |
 
-| 任务详情 | 漏洞表 |
+| 任务详情（Top-N / 利用链 / 鉴权） | 操作审计 |
 |---|---|
-| ![detail](docs/screenshots/03_task_detail.png) | ![vulns](docs/screenshots/04_vuln_table.png) |
+| ![detail](docs/screenshots/03_task_detail.png) | ![audit](docs/screenshots/04_audit.png) |
 
-| 报告 |
-|---|
-| ![report](docs/screenshots/05_report.png) |
+| 动态复现 | 情报闭环 |
+|---|---|
+| ![verified](docs/screenshots/07_verified.png) | ![intel](docs/screenshots/06_intel.png) |
+
+| Engine 注册表 | 审计报告 |
+|---|---|
+| ![engines](docs/screenshots/05_engines.png) | ![report](docs/screenshots/08_report.png) |
 
 ## 快速开始
 
@@ -102,6 +108,17 @@ rules:
 
 规则会先经过 `semgrep --validate`，无效文件会被跳过并写入任务日志；有效规则与内置规则包一起执行。默认最多加载 50 个文件，可用 `AUDIT_MAX_CUSTOM_RULES` 调整。更多说明见 [docs/CUSTOM_RULES.md](docs/CUSTOM_RULES.md)。
 
+## v4.9 更新（2026-11-01）
+
+- 多语言内置 Semgrep 规则覆盖 16 种语言；PHP 定向规则扩到 13 条。
+- 开源规则包：gosec 7 条 + njsscan 21 条（共 28 条），默认 `AUDIT_RULE_PACKS_MODE=test`；配置缺失或哈希不符时 fail-closed，`extended` 预留。项目特有的定向规则请放 `data/rules/`，不随仓库发布。
+- 路由/鉴权：Java 类级注解、JS 变量/多行 Express、Django URLconf 提取修复与路径归一化。
+- Agent 与任务：动态证据判定、领取/租约状态、跨任务重复行去重。
+- UI：P1/P2 修复、统一错误页、lab/沙箱视图、本地字体。
+- 边界不变：规则命中仍是候选；`verified` 也不等于 0day。
+
+完整变更见 [RELEASE_NOTES_v4.9.md](RELEASE_NOTES_v4.9.md)。
+
 ## 架构
 
 ```
@@ -120,11 +137,13 @@ rules:
 
 ```
 app/                 后端流水线、引擎、Agent、报告
+app/skills/rules/    多语言内置 Semgrep 规则
+app/skills/rule_pack_data/  开源规则包（gosec/njsscan 移植）
 app/skills/giants_rules/   内置授权/配置规则
 app/skills/egress_proxy.py 沙箱依赖阶段白名单代理
 data/rules/          自定义 Semgrep 规则（运行时目录）
 templates/ static/   Web UI
-tools/iseecode_cli.py CLI
+tools/iseecode_cli.py CLI；tools/scan_dependencies.py 依赖 CVE 递归扫描
 docs/                架构、路线、规则说明、截图
 ```
 
@@ -138,4 +157,4 @@ docs/                架构、路线、规则说明、截图
 
 ## License
 
-MIT（见 [LICENSE](LICENSE)）；第三方引擎/工具遵循各自许可证，CodeQL 商用需遵循 GitHub 条款。
+MIT（见 [LICENSE](LICENSE)）；第三方引擎/工具遵循各自许可证。移植规则中 gosec 为 Apache-2.0、njsscan 为 LGPL-3.0（见 [app/skills/rule_pack_data/OPENSOURCE-NOTICE.md](app/skills/rule_pack_data/OPENSOURCE-NOTICE.md)）；Lato/Fira Code 字体为 SIL OFL 1.1（见 [static/fonts/README.md](static/fonts/README.md)）。CodeQL 商用需遵循 GitHub 条款。

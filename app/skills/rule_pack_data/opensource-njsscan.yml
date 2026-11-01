@@ -1,0 +1,1656 @@
+rules:
+- id: oss-njsscan-node_nosqli_injection
+  mode: taint
+  pattern-sources:
+  - patterns:
+    - pattern-either:
+      - pattern: $REQ.$PROP
+      - pattern: $REQ.$PROP.$FIELD
+      - pattern: $REQ.$PROP[$KEY]
+    - metavariable-regex:
+        metavariable: $REQ
+        regex: (?i)^(req|request)$
+    - metavariable-regex:
+        metavariable: $PROP
+        regex: ^(body|query|params|headers|cookies)$
+  pattern-sanitizers:
+  - patterns:
+    - pattern: $SANITIZE(...)
+    - pattern-either:
+      - pattern-inside: '$SANITIZE = require(''mongo-sanitize'')
+
+          ...
+
+          '
+      - pattern-inside: 'import $SANITIZE from ''mongo-sanitize''
+
+          ...
+
+          '
+      - pattern-inside: 'import * as $SANITIZE from ''mongo-sanitize''
+
+          ...
+
+          '
+      - pattern-inside: 'import {..., $SANITIZE, ...} from ''mongo-sanitize''
+
+          ...
+
+          '
+  pattern-sinks:
+  - pattern: $OBJ.findOne($QUERY, ...)
+  pattern-not-sinks:
+  - patterns:
+    - pattern: $OBJ.findOne($QUERY, ...)
+    - pattern-either:
+      - pattern-inside: '$SEQUELIZE = require(''sequelize'')
+
+          ...
+
+          $SEQUELIZE(...)
+
+          ...
+
+          '
+      - pattern-inside: 'import $SEQUELIZE from ''sequelize''
+
+          ...
+
+          $SEQUELIZE(...)
+
+          ...
+
+          '
+  message: Untrusted user input in findOne() function can result in NoSQL Injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a1
+    cwe: cwe-943
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 node_nosqli_injection
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: node_nosqli_injection
+    dedupe_key: njsscan:node_nosqli_injection
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-node_deserialize
+  patterns:
+  - pattern-inside: 'require(''node-serialize'')
+
+      ...
+
+      '
+  - pattern: '$X.unserialize(...)
+
+      '
+  message: User controlled data in 'unserialize()' or 'deserialize()' function can result in Object Injection or Remote Code Injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a8
+    cwe: cwe-502
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 node_deserialize
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: node_deserialize
+    dedupe_key: njsscan:node_deserialize
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-vm_runincontext_injection
+  patterns:
+  - pattern-inside: 'require(''vm'')
+
+      ...
+
+      '
+  - pattern-either:
+    - pattern-inside: function ($REQ, $RES, ...) {...}
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: '$CONTEXT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$CONTEXT = <... {$NAME:$REQ.$QUERY.$FOO} ...>;
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$CONTEXT = {$NAME: <... $REQ.$QUERY.$FOO ...>};
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$VAR = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $CONTEXT = {$NAME: <... $VAR ...>};
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$CONTEXT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$CONTEXT = <... {$NAME:$REQ.$BODY} ...>;
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$CONTEXT = {$NAME: <... $REQ.$BODY ...>};
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+    - pattern: '$VAR = <... $REQ.$BODY ...>;
+
+        ...
+
+        $CONTEXT = {$NAME: <... $VAR ...>};
+
+        ...
+
+        $VM.runInContext($CODE,<... $CONTEXT ...>,...)
+
+        '
+  message: Untrusted user input in `vm.runInContext()` can result in code injection.
+  severity: ERROR
+  languages:
+  - javascript
+  - typescript
+  metadata:
+    owasp-web: a1
+    cwe: cwe-94
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 vm_runincontext_injection
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: vm_runincontext_injection
+    dedupe_key: njsscan:vm_runincontext_injection
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-yaml_deserialize
+  patterns:
+  - pattern-inside: 'require(''js-yaml'')
+
+      ...
+
+      '
+  - pattern: '$X.load(...)
+
+      '
+  message: User controlled data in 'yaml.load()' function can result in Remote Code Injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a8
+    cwe: cwe-502
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 yaml_deserialize
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: yaml_deserialize
+    dedupe_key: njsscan:yaml_deserialize
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-shelljs_os_command_exec
+  patterns:
+  - pattern-inside: 'require(''shelljs'')
+
+      ...
+
+      '
+  - pattern-either:
+    - pattern-inside: function ($REQ, $RES, ...) {...}
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: '$EXEC.exec(<... $REQ.$QUERY.$VAR ...>, ...)
+
+        '
+    - pattern: '$EXEC.exec( <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$INP = <... $REQ.$QUERY.$VAR ...>;
+
+        ...
+
+        $EXEC.exec(<... $INP ...>, ...)
+
+        '
+    - pattern: '$INP = <... $REQ.$QUERY ...>;
+
+        ...
+
+        $EXEC.exec(<... $INP ...>, ...)
+
+        '
+  message: User controlled data in 'shelljs.exec()' can result in Remote OS Command Execution.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a1
+    cwe: cwe-78
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 shelljs_os_command_exec
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: shelljs_os_command_exec
+    dedupe_key: njsscan:shelljs_os_command_exec
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-handlebars_safestring
+  pattern-either:
+  - pattern: $X.SafeString(...)
+  - pattern: new Handlebars.SafeString(...)
+  message: When you use SafeString or triple curly braces ({{{ }}}), Handlebars does not escape the content, allowing raw HTML to be rendered in the browser. This is useful if you want to insert valid HTML content into your template, like bold text (<strong>) or links (<a>), but it becomes dangerous if you are dealing with untrusted or user-generated content, as it can cause a Cross-site scripting attack (XSS). You should only use SafeString when the content is trusted. For example, if the content is generated by the server and does not come from user input or an untrusted source. If you are dealing with user-generated content, make sure to sanitize it to remove any malicious scripts before marking it as "safe".
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a1
+    cwe: cwe-79
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 handlebars_safestring
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: handlebars_safestring
+    dedupe_key: njsscan:handlebars_safestring
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-handlebars_noescape
+  patterns:
+  - pattern: '$X.compile(..., {noEscape: true}, ...)
+
+      '
+  message: Disabling Escaping in Handlebars is not a secure behaviour. This can introduce XSS vulnerabilties.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a1
+    cwe: cwe-80
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 handlebars_noescape
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: handlebars_noescape
+    dedupe_key: njsscan:handlebars_noescape
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-zip_path_overwrite
+  patterns:
+  - pattern-either:
+    - pattern-inside: '$X = require(''unzip'')
+
+        ...
+
+        '
+    - pattern-inside: '$X = require(''unzipper'')
+
+        ...
+
+        '
+  - pattern-inside: "$Y.pipe($UNZIP.Parse(...)).on('entry', function $FUNC(...) {\n    ...\n}, ...)\n"
+  - pattern-not: '$X = $FILENAME.indexOf(...)
+
+      '
+  - pattern-not: '$FUNC.pipe($FS.createWriteStream($PATH.join(..., $PATH.basename($FILENAME, ...))))
+
+      '
+  - pattern-not: '$FUNC.pipe($FS.writeFile($PATH.join(..., $PATH.basename($FILENAME, ...))))
+
+      '
+  - pattern-not: '$FUNC.pipe($FS.writeFileSync($PATH.join(..., $PATH.basename($FILENAME, ...))))
+
+      '
+  - pattern-either:
+    - pattern: '$FUNC.pipe($FS.createWriteStream($FIL, ...))
+
+        '
+    - pattern: '$FUNC.pipe($FS.writeFile($FIL, ...))
+
+        '
+    - pattern: '$FUNC.pipe($FS.writeFileSync($FIL, ...))
+
+        '
+  message: Insecure ZIP archive extraction can result in arbitrary path over write and can result in code injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a5
+    cwe: cwe-22
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 zip_path_overwrite
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: zip_path_overwrite
+    dedupe_key: njsscan:zip_path_overwrite
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-zip_path_overwrite2
+  patterns:
+  - pattern-either:
+    - pattern-inside: '$X = require(''unzip'')
+
+        ...
+
+        '
+    - pattern-inside: '$X = require(''unzipper'')
+
+        ...
+
+        '
+  - pattern-inside: "$UNZIP.Parse(...).on('entry', function $FUNC($ENTRY) {\n    ...\n}, ...)\n"
+  - pattern-not: 'if ($FILENAME.indexOf(''..''))
+
+      '
+  - pattern-not: '$FS.createWriteStream($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFile($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFileSync($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-either:
+    - pattern: '$FS.createWriteStream($FIL, ...)
+
+        '
+    - pattern: '$FS.writeFile($FIL, ...)
+
+        '
+    - pattern: '$FS.writeFileSync($FIL, ...)
+
+        '
+  message: Insecure ZIP archive extraction can result in arbitrary path over write and can result in code injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a5
+    cwe: cwe-22
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 zip_path_overwrite2
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: zip_path_overwrite2
+    dedupe_key: njsscan:zip_path_overwrite2
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-admzip_path_overwrite
+  patterns:
+  - pattern-inside: '$X = require(''adm-zip'')
+
+      ...
+
+      '
+  - pattern-not: 'if ($FILENAME.indexOf(''..''))
+
+      '
+  - pattern-not: '$FS.createWriteStream($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFile($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFileSync($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-either:
+    - pattern: $ZIPENTZ.forEach(function $FUNC($ENTRY, ...) { $FS.createWriteStream(...) }, ...)
+    - pattern: $ZIPENTZ.forEach(function $FUNC($ENTRY, ...) { $FS.writeFile(...) }, ...)
+    - pattern: $ZIPENTZ.forEach(function $FUNC($ENTRY, ...) { $FS.writeFileSync(...) }, ...)
+  message: Insecure ZIP archive extraction using adm-zip can result in arbitrary path over write and can result in code injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a5
+    cwe: cwe-22
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 admzip_path_overwrite
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: admzip_path_overwrite
+    dedupe_key: njsscan:admzip_path_overwrite
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-tar_path_overwrite
+  patterns:
+  - pattern-inside: '$X = require(''tar-stream'')
+
+      ...
+
+      '
+  - pattern-not-inside: "$Y.pipe($UNZIP.Parse(...)).on('entry', function $FUNC(...) {\n    ...\n}, ...)\n"
+  - pattern-inside: "$EXTRACT.on('entry', function $FUNC(...) {\n  ...\n}, ...)\n"
+  - pattern-not: 'if ($FILENAME.indexOf(''..''))
+
+      '
+  - pattern-not: '$FS.createWriteStream($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFile($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-not: '$FS.writeFileSync($PATH.join(..., $PATH.basename($FILENAME, ...)))
+
+      '
+  - pattern-either:
+    - pattern: '$FS.createWriteStream($FIL, ...)
+
+        '
+    - pattern: '$FS.writeFile($FIL, ...)
+
+        '
+    - pattern: '$FS.writeFileSync($FIL, ...)
+
+        '
+  message: Insecure TAR archive extraction can result in arbitrary path over write and can result in code injection.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a5
+    cwe: cwe-22
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 tar_path_overwrite
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: tar_path_overwrite
+    dedupe_key: njsscan:tar_path_overwrite
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-express_lfr
+  patterns:
+  - pattern-inside: 'require(''hbs'')
+
+      ...
+
+      '
+  - pattern-inside: 'require(''express'')
+
+      ...
+
+      '
+  - pattern-either:
+    - pattern: '$INP = <... $REQ.$QUERY ...>;
+
+        ...
+
+        $RES.render($VIEW, <... $INP ...>)
+
+        '
+    - pattern: '$INP = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $RES.render($VIEW, <... $INP ...>)
+
+        '
+    - pattern: $RES.render($VIEW, <... $REQ.$QUERY.$FOO ...>)
+    - pattern: $RES.render($VIEW, <... $REQ.$BODY ...>)
+  message: Untrusted user input in express render() function can result in arbitrary file read when hbs templating is used.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a5
+    cwe: cwe-23
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 express_lfr
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: express_lfr
+    dedupe_key: njsscan:express_lfr
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-electron_disable_websecurity
+  patterns:
+  - pattern-either:
+    - pattern: 'new BrowserWindow({webPreferences: {webSecurity: false}})
+
+        '
+    - pattern: 'var $X = {webPreferences: {webSecurity: false}};
+
+        '
+  message: Disabling webSecurity will disable the same-origin policy and allows the execution of insecure code from any domain.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a6
+    cwe: cwe-346
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 electron_disable_websecurity
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: electron_disable_websecurity
+    dedupe_key: njsscan:electron_disable_websecurity
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-electron_allow_http
+  patterns:
+  - pattern-either:
+    - pattern: 'new BrowserWindow({webPreferences: {allowRunningInsecureContent: true}})
+
+        '
+    - pattern: 'var $X = {webPreferences: {allowRunningInsecureContent: true}};
+
+        '
+  message: Application can load content over HTTP and that makes the app vulnerable to Man in the middle attacks.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a6
+    cwe: cwe-319
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 electron_allow_http
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: electron_allow_http
+    dedupe_key: njsscan:electron_allow_http
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-electron_nodejs_integration
+  patterns:
+  - pattern-either:
+    - pattern: 'new BrowserWindow({webPreferences: {nodeIntegration: true}})
+
+        '
+    - pattern: 'var $X = {webPreferences: {nodeIntegration: true}};
+
+        '
+  message: Node integration exposes node.js APIs to the electron app and this can introduce remote code execution vulnerabilities to the application if the app is vulnerable to Cross Site Scripting (XSS).
+  languages:
+  - javascript
+  - typescript
+  severity: WARNING
+  metadata:
+    owasp-web: a6
+    cwe: cwe-272
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 electron_nodejs_integration
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: electron_nodejs_integration
+    dedupe_key: njsscan:electron_nodejs_integration
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-grpc_insecure_connection
+  patterns:
+  - pattern-inside: 'require(''grpc'')
+
+      ...
+
+      '
+  - pattern: $CREDENTIALS.createInsecure()
+  message: Found an insecure gRPC connection. This creates a connection without encryption to a gRPC client/server. A malicious attacker could  tamper with the gRPC message, which could compromise the machine.
+  metadata:
+    owasp-web: a8
+    cwe: cwe-502
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 grpc_insecure_connection
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: grpc_insecure_connection
+    dedupe_key: njsscan:grpc_insecure_connection
+  severity: ERROR
+  languages:
+  - javascript
+  - typescript
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-node_xxe
+  patterns:
+  - pattern-either:
+    - pattern-inside: function ($REQ, $RES, ...) {...}
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: '$LIBXML.parseXmlString(..., <... $REQ.$QUERY.$VAR.$FILE ...>, ...)
+
+        '
+    - pattern: '$LIBXML.parseXmlString(..., <... $REQ.$QUERY.$VAR ...>, ...)
+
+        '
+    - pattern: '$LIBXML.parseXmlString(..., <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY.$VAR.$FILE ...>; ... $LIBXML.parseXmlString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY.$VAR ...>; ... $LIBXML.parseXmlString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY ...>; ... $LIBXML.parseXmlString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$LIBXML.parseXml(..., <... $REQ.$QUERY.$VAR.$FILE ...>, ...)
+
+        '
+    - pattern: '$LIBXML.parseXml(..., <... $REQ.$QUERY.$VAR ...>, ...)
+
+        '
+    - pattern: '$LIBXML.parseXml(..., <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY.$VAR.$FILE ...>; ... $LIBXML.parseXml(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY.$VAR ...>; ... $LIBXML.parseXml(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$FOO = <... $REQ.$QUERY ...>;
+
+        ...
+
+        $LIBXML.parseXml(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $PARSER.parseString(..., <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $PARSER.parseString(..., <... $REQ.$QUERY.$BAR ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $PARSER.parseString(..., <... $REQ.$QUERY.$BAR.$FILE ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $PARSER.push(..., <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $PARSER.push(..., <... $REQ.$QUERY.$FOO ...> , ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $PARSER.push(..., <... $REQ.$QUERY.$FOO.$FILE ...> , ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY ...>;
+
+        ...
+
+        $PARSER.parseString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY.$BAR ...>;
+
+        ...
+
+        $PARSER.parseString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY.$BAR.$FILE ...>;
+
+        ...
+
+        $PARSER.parseString(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY ...>;
+
+        ...
+
+        $PARSER.push(..., <... $FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY.$BAR ...>;
+
+        ...
+
+        $PARSER.push(..., <... $FOO ...> , ...)
+
+        '
+    - pattern: '$PARSER = new libxmljs.SaxPushParser()
+
+        ...
+
+        $FOO = <... $REQ.$QUERY.$BAR.$FILE ...>;
+
+        ...
+
+        $PARSER.push(..., <... $FOO ...> , ...)
+
+        '
+  message: User controlled data in XML parsers can result in XML External or Internal Entity (XXE) Processing vulnerabilities
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a4
+    cwe: cwe-611
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 node_xxe
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: node_xxe
+    dedupe_key: njsscan:node_xxe
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-node_entity_expansion
+  patterns:
+  - pattern-either:
+    - pattern-inside: function ($REQ, $RES, ...) {...}
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: '$PARSER = new expat.Parser()
+
+        ...
+
+        $PARSER.write(..., <... $REQ.$QUERY ...>, ...)
+
+        '
+    - pattern: '$PARSER = new expat.Parser()
+
+        ...
+
+        $PARSER.write(..., <... $REQ.$QUERY.$FOO ...>, ...)
+
+        '
+    - pattern: '$PARSER = new expat.Parser()
+
+        ...
+
+        $PARSER.write(..., <... $REQ.$QUERY.$FOO.$FILE ...>, ...)
+
+        '
+  message: User controlled data in XML Parsers can result in XML Internal Entity Processing vulnerabilities like in DoS.
+  languages:
+  - javascript
+  - typescript
+  severity: ERROR
+  metadata:
+    owasp-web: a4
+    cwe: cwe-776
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 node_entity_expansion
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: node_entity_expansion
+    dedupe_key: njsscan:node_entity_expansion
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-puppeteer_ssrf
+  patterns:
+  - pattern-inside: 'require(''puppeteer'')
+
+      ...
+
+      '
+  - pattern-either:
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: $PAGE.goto(<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.goto(<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.setContent(<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.setContent(<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluate(<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluate(<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluateHandle(<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluateHandle(<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluateOnNewDocument(<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluateOnNewDocument(<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluate($CODE,<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluate($CODE,<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluateHandle($CODE,<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluateHandle($CODE,<... $REQ.$BODY ...>,...)
+    - pattern: $PAGE.evaluateOnNewDocument($CODE,<... $REQ.$QUERY.$FOO ...>,...)
+    - pattern: $PAGE.evaluateOnNewDocument($CODE,<... $REQ.$BODY ...>,...)
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.goto(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.goto(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.setContent(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.setContent(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluate(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluate(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateHandle(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateHandle(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluate($CODE,<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluate($CODE,<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateHandle($CODE,<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateHandle($CODE,<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument($CODE,<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument($CODE,<... $INPUT ...>,...)
+
+        '
+  message: If unverified user data can reach the `puppeteer` methods it can result in Server-Side Request Forgery vulnerabilities.
+  metadata:
+    owasp-web: a1
+    cwe: cwe-918
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 puppeteer_ssrf
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: puppeteer_ssrf
+    dedupe_key: njsscan:puppeteer_ssrf
+  severity: ERROR
+  languages:
+  - javascript
+  - typescript
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-playwright_ssrf
+  patterns:
+  - pattern-inside: 'require(''playwright'')
+
+      ...
+
+      '
+  - pattern-either:
+    - pattern-inside: function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: $X = function $FUNC($REQ, $RES, ...) {...}
+    - pattern-inside: var $X = function $FUNC($REQ, $RES, ...) {...};
+    - pattern-inside: $APP.$METHOD(..., function $FUNC($REQ, $RES, ...) {...})
+  - pattern-either:
+    - pattern: $PAGE.goto(<... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.goto(<... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.setContent(<... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.setContent(<... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluate(<... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.evaluate(<... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluate($CODE,..., <... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.evaluate($CODE,..., <... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluateHandle(<... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.evaluateHandle(<... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluateHandle($CODE,..., <... $REQ.$QUERY.$FOO ...>, ...)
+    - pattern: $PAGE.evaluateHandle($CODE,..., <... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluateOnNewDocument(<... $REQ.$BODY ...>, ...)
+    - pattern: $PAGE.evaluateOnNewDocument(<... $REQ.$BODY.$FOO ...>, ...)
+    - pattern: $CONTEXT.addInitScript(<... $REQ.$BODY ...>,...)
+    - pattern: $CONTEXT.addInitScript(<... $REQ.$BODY.$FOO ...>,...)
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.goto(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.goto(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.setContent(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.setContent(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluate($CODE,..., <... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluate($CODE,..., <... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluate(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluate(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateHandle(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateHandle(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateHandle($CODE,..., <... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateHandle($CODE,..., <... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$QUERY.$FOO ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $PAGE.evaluateOnNewDocument(<... $INPUT ...>,...)
+
+        '
+    - pattern: '$INPUT = <... $REQ.$BODY ...>;
+
+        ...
+
+        $CONTEXT.addInitScript($INPUT,...)
+
+        '
+  message: If unverified user data can reach the `puppeteer` methods it can result in Server-Side Request Forgery vulnerabilities.
+  metadata:
+    owasp-web: a1
+    cwe: cwe-918
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 playwright_ssrf
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: playwright_ssrf
+    dedupe_key: njsscan:playwright_ssrf
+  severity: ERROR
+  languages:
+  - javascript
+  - typescript
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'
+- id: oss-njsscan-xss_disable_mustache_escape
+  pattern: $OBJ.escapeMarkup = false
+  severity: WARNING
+  languages:
+  - javascript
+  - typescript
+  metadata:
+    cwe: cwe-116
+    owasp-web: a7
+    category: security
+    license: LGPL-3.0
+    license_url: https://github.com/ajinabraham/njsscan/blob/master/LICENSE
+    source: njsscan 1.0.2 xss_disable_mustache_escape
+    source_url: https://files.pythonhosted.org/packages/74/21/74f9263c70e40f91e7b51e0bc3243f896a489dd42766059e834603dcf77a/njsscan-1.0.2.tar.gz
+    source_version: 1.0.2
+    source_sha256: 7d7361822e61cbf2ccab1999bd9596d71503f1042b270e1227989b40f9f69ddc
+    source_rule: xss_disable_mustache_escape
+    dedupe_key: njsscan:xss_disable_mustache_escape
+  message: Markup escaping disabled. This can be used with some template engines to escape disabling of HTML entities, which can lead to XSS attacks.
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+    - '**/dist/**'
+    - '**/build/**'
+    - '**/*.min.js'

@@ -1,0 +1,31 @@
+rules:
+- id: cpp-system-call
+  message: system() 执行 shell 命令，存在命令注入风险
+  severity: ERROR
+  languages: [cpp]
+  pattern: system(...)
+- id: cpp-strcpy
+  message: 不安全的 strcpy 调用
+  severity: ERROR
+  languages: [cpp]
+  pattern: strcpy($DST, $SRC)
+- id: cpp-strcat
+  message: 不安全的 strcat 调用
+  severity: ERROR
+  languages: [cpp]
+  pattern: strcat($DST, $SRC)
+- id: cpp-eval-shell
+  message: popen 执行命令，存在命令注入风险
+  severity: ERROR
+  languages: [cpp]
+  pattern: popen($CMD, $MODE)
+- id: cpp-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages: [cpp]
+  pattern-regex: '(?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"'
+- id: cpp-weak-random
+  message: 使用 rand() 生成安全相关随机数
+  severity: INFO
+  languages: [cpp]
+  pattern: rand()

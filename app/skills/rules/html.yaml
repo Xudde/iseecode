@@ -1,0 +1,31 @@
+rules:
+- id: html-inline-script
+  message: 页面内联脚本，存在 XSS 放大风险
+  severity: INFO
+  languages:
+  - generic
+  pattern-regex: <script(?![^>]*src=)[^>]*>
+- id: html-iframe-external
+  message: 引用外部 iframe，存在点击劫持/恶意嵌入风险
+  severity: WARNING
+  languages:
+  - generic
+  pattern-regex: <iframe[^>]+src="http[^"]*"
+- id: html-http-resource
+  message: 引用不安全的 HTTP 外部资源
+  severity: WARNING
+  languages:
+  - generic
+  pattern-regex: (?:src|href)\s*=\s*["\x27]http://
+- id: html-form-no-csrf
+  message: 表单缺少 CSRF 防护字段
+  severity: INFO
+  languages:
+  - generic
+  pattern-regex: <form[^>]*method=["\x27]?post
+- id: html-meta-refresh
+  message: meta 刷新跳转，可能被用于开放重定向
+  severity: INFO
+  languages:
+  - generic
+  pattern-regex: <meta[^>]+http-equiv=["\x27]?refresh

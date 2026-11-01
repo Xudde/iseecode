@@ -133,7 +133,7 @@ def name_vulns(db, task, rows, llm_cfg: dict, log_fn=None) -> int:
             or not (getattr(r, "precondition", None) or "").strip()]
     if not todo:
         return 0
-    client = OpenAI(base_url=llm_cfg["base_url"], api_key=llm_cfg["api_key"], timeout=60)
+    client = OpenAI(base_url=llm_cfg["base_url"], api_key=llm_cfg["api_key"], timeout=25, max_retries=0)
     batch_size = 20
     done = 0
     for i in range(0, len(todo), batch_size):

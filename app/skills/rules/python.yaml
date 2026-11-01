@@ -1,0 +1,80 @@
+# Python 漏洞规则（≥5 条）
+rules:
+  - id: python-sql-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: SQL 注入：用户输入直接拼接到 SQL 执行语句
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+      - pattern: request.values.get(...)
+      - pattern: request.cookies.get(...)
+      - pattern: request.json[...]
+    pattern-sinks:
+      - pattern: $CUR.execute($QUERY)
+      - pattern: $CUR.executemany($QUERY, ...)
+      - pattern: $CUR.executescript($QUERY)
+  - id: python-command-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: 命令注入：用户输入传入 os.system/subprocess shell 执行
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+    pattern-sinks:
+      - pattern: os.system($CMD)
+      - pattern: subprocess.call(..., shell=True)
+      - pattern: subprocess.run(..., shell=True)
+      - pattern: subprocess.Popen(..., shell=True)
+  - id: python-eval-exec
+    languages: [python]
+    severity: ERROR
+    message: 代码执行：使用 eval/exec 执行动态代码，可被攻击者利用
+    patterns:
+      - pattern-either:
+          - pattern: eval($X)
+          - pattern: exec($X)
+  - id: python-pickle-deserialization
+    languages: [python]
+    severity: WARNING
+    message: 不安全反序列化：pickle.loads 反序列化不可信数据可导致 RCE
+    patterns:
+      - pattern: pickle.loads($X)
+  - id: python-hardcoded-secret
+    languages: [python]
+    severity: WARNING
+    message: 硬编码密钥：源码中写死敏感凭据
+    patterns:
+      - pattern-either:
+          - pattern: '$KEY = "..."'
+          - pattern: "$KEY = '...'"
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(secret|password|passwd|api_key|apikey|token).*
+      - metavariable-pattern:
+          metavariable: $KEY
+          language: python
+          pattern: str
+  - id: python-path-traversal
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: 路径穿越：用户输入直接拼接文件路径
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+    pattern-sinks:
+      - pattern: open(..., ...)
+  - id: python-ssrf
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: SSRF：用户输入直接作为请求 URL
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+    pattern-sinks:
+      - pattern: requests.get($URL, ...)
+      - pattern: requests.post($URL, ...)

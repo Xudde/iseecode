@@ -20,7 +20,7 @@
     <input type="text" id="c-api_key" placeholder="sk-…">
     <label class="f-label"><b>模型</b> model</label>
     <input type="text" id="c-model" placeholder="deepseek-chat">
-    <div class="tip-box" style="margin-top:16px"><b>安全提醒</b>：Key 明文存储于服务器数据库，请确保平台仅部署在可信内网，并设置 <code>AUTH_TOKEN</code> 环境变量开启访问鉴权。</div>
+    <div class="tip-box" style="margin-top:16px"><b>安全提醒</b>：Key 使用 AES-GCM 加密存储（<code>data/master.key</code> 需与数据库分开备份）；仍需设置 <code>AUTH_TOKEN</code> 开启访问鉴权。</div>
     <div style="margin-top:16px;display:flex;gap:10px">
       <button class="btn btn-primary" id="btn-save-llm">保存 LLM 配置</button>
       <span class="muted" style="align-self:center;font-size:12px" id="llm-saved"></span>
@@ -41,7 +41,7 @@
     <input type="text" id="c-night_api_key" placeholder="sk-…">
     <label class="f-label"><b>夜间模型</b> night_model</label>
     <input type="text" id="c-night_model" placeholder="glm-...">
-    <label class="f-label"><b>时区</b> night_tz <span class="muted">— 例如 Asia/Shanghai；服务器是 EDT，必须填对</span></label>
+    <label class="f-label"><b>时区</b> night_tz <span class="muted">— 例如 Asia/Shanghai；以宿主机时区为准，必须填对</span></label>
     <input type="text" id="c-night_tz" placeholder="Asia/Shanghai">
     <div class="tip-box" style="margin-top:12px"><b>用法</b>：白天配置保留 DeepSeek；夜间窗口内自动切到活动 Key。窗口外、Key 不完整或过期时自动回落白天配置，不会强行调用。</div>
     <div style="margin-top:14px;display:flex;gap:10px">
@@ -84,8 +84,8 @@
       <input type="number" id="c-agent_token_budget" min="1">
       <label class="f-label"><b>全量审计轮次</b> full_audit_rounds <span class="muted">— Agent 自主遍历源码的轮数</span></label>
       <input type="number" id="c-full_audit_rounds" min="1">
-      <label class="f-label"><b>全量审计文件数熔断</b> full_audit_max_files <span class="muted">— 工作区文件数超过该值自动跳过全量审计（默认 500，实测千文件级仓库产出极低）</span></label>
-      <input type="number" id="c-full_audit_max_files" min="1">
+      <label class="f-label"><b>全量审计文件数熔断</b> full_audit_max_files <span class="muted">— 工作区文件数超过该值自动跳过全量审计；0=不限制（仍受每轮 token 预算约束）</span></label>
+      <input type="number" id="c-full_audit_max_files" min="0">
       <label class="f-label"><b>每轮 token 预算</b> full_audit_token_per_round</label>
       <input type="number" id="c-full_audit_token_per_round" min="1">
       <label class="f-label"><b>每轮漏洞提交上限</b> full_audit_max_findings</label>
@@ -165,7 +165,8 @@ document.getElementById('btn-save-agent').addEventListener('click', async () => 
   KEYS.forEach(k => {
     const el = document.getElementById('c-' + k);
     const n = parseInt(el.value, 10);
-    if (!Number.isInteger(n) || n < 1) bad = bad || k;
+    const min = k === 'full_audit_max_files' ? 0 : 1;
+    if (!Number.isInteger(n) || n < min) bad = bad || k;
     body[k] = Number.isInteger(n) ? n : null;
   });
   if (bad) { SAP.toast('参数必须是正整数：' + bad, 'err'); return; }

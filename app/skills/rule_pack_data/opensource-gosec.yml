@@ -1,0 +1,285 @@
+rules:
+- id: oss-gosec-g108-pprof-blank-import
+  languages:
+  - go
+  severity: WARNING
+  message: Blank import of net/http/pprof registers profiling handlers on the default mux; if that mux is served, /debug/pprof is exposed without auth.
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-306: Missing Authentication for Critical Function'
+    confidence: HIGH
+    license: Apache-2.0
+    source: gosec 2.30.0 G108
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G108
+    dedupe_key: gosec:G108:pprof_blank_import
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern-regex: (?m)^\s*_\s+"net/http/pprof"\s*$
+- id: oss-gosec-g111-http-dir-root
+  languages:
+  - go
+  severity: WARNING
+  message: http.Dir("/") serves the entire filesystem as static content; any path traversal or misroute exposes host files (CWE-22).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-22: Improper Limitation of a Pathname to a Restricted Directory (''Path Traversal'')'
+    confidence: MEDIUM
+    license: Apache-2.0
+    source: gosec 2.30.0 G111
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G111
+    dedupe_key: gosec:G111:http_dir_root
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern-either:
+    - pattern: http.Dir("/")
+    - pattern: http.Dir(`/`)
+- id: oss-gosec-g112-server-no-read-timeout
+  languages:
+  - go
+  severity: WARNING
+  message: http.Server literal has neither ReadHeaderTimeout nor ReadTimeout; slow-header clients can hold connections open (slowloris, CWE-400).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-400: Uncontrolled Resource Consumption'
+    confidence: MEDIUM
+    license: Apache-2.0
+    source: gosec 2.30.0 G112
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G112
+    dedupe_key: gosec:G112:server_no_read_header_timeout
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern: http.Server{...}
+  - pattern-not: 'http.Server{..., ReadHeaderTimeout: ..., ...}'
+  - pattern-not: 'http.Server{..., ReadTimeout: ..., ...}'
+- id: oss-gosec-g114-listenandserve-no-timeout
+  languages:
+  - go
+  severity: WARNING
+  message: http.ListenAndServe/ListenAndServeTLS cannot set read/write timeouts; use an http.Server with timeouts to bound slow clients (CWE-400).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-400: Uncontrolled Resource Consumption'
+    confidence: HIGH
+    license: Apache-2.0
+    source: gosec 2.30.0 G114
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G114
+    dedupe_key: gosec:G114:listenandserve_no_timeout
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern-either:
+    - pattern: http.ListenAndServe(...)
+    - pattern: http.ListenAndServeTLS(...)
+- id: oss-gosec-g116-trojan-source
+  languages:
+  - go
+  severity: ERROR
+  message: Go source contains Unicode bidirectional control characters; these can reorder displayed code versus executed code (Trojan Source, CWE-838).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-838: Inappropriate Encoding for Output Context'
+    confidence: MEDIUM
+    license: Apache-2.0
+    source: gosec 2.30.0 G116
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G116
+    dedupe_key: gosec:G116:bidi_control_characters
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern-regex: '[\x{202A}-\x{202E}\x{2066}-\x{2069}\x{200F}]'
+- id: oss-gosec-g125-url-joinpath-unescaped
+  languages:
+  - go
+  severity: WARNING
+  message: url.JoinPath receives a non-literal, non-PathEscape element; a value containing ../ can escape the intended base path (CWE-22).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-22: Improper Limitation of a Pathname to a Restricted Directory (''Path Traversal'')'
+    confidence: MEDIUM
+    license: Apache-2.0
+    source: gosec 2.30.0 G125
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G125
+    dedupe_key: gosec:G125:url_joinpath_unescaped
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern: url.JoinPath($BASE, $ELEM, ...)
+  - pattern-not: url.JoinPath($BASE, "...", ...)
+  - pattern-not: url.JoinPath($BASE, url.PathEscape(...), ...)
+- id: oss-gosec-g407-hardcoded-iv
+  languages:
+  - go
+  severity: ERROR
+  message: Encryption uses a hardcoded IV/nonce; reusing a fixed value across messages breaks semantic security (CWE-329/CWE-323).
+  metadata:
+    category: security
+    cwe:
+    - 'CWE-329: Generation of Predictable IV with CBC Mode'
+    - 'CWE-323: Reusing a Nonce, Key Pair in Encryption'
+    confidence: HIGH
+    license: Apache-2.0
+    source: gosec 2.30.0 G407
+    source_url: https://goproxy.cn/github.com/securego/gosec/v2/@v/v2.30.0.zip
+    source_version: 2.30.0
+    source_sha256: 167dd29ac153ac5d61f4e69111c9fa0f8e18e4071273f04e6cc1c78e4e4dac9f
+    source_rule: G407
+    dedupe_key: gosec:G407:hardcoded_iv
+  paths:
+    exclude:
+    - '**/test/**'
+    - '**/tests/**'
+    - '**/__tests__/**'
+    - '**/test_*/**'
+    - '**/docs/**'
+    - '**/doc/**'
+    - '**/examples/**'
+    - '**/example/**'
+    - '**/fixtures/**'
+    - '**/e2e/**'
+    - '**/vendor/**'
+    - '**/node_modules/**'
+    - '**/.venv/**'
+    - '**/venv/**'
+    - '**/site-packages/**'
+    - '**/third_party/**'
+  patterns:
+  - pattern-either:
+    - pattern: cipher.NewCBCEncrypter($BLOCK, []byte("..."))
+    - pattern: cipher.NewCFBEncrypter($BLOCK, []byte("..."))
+    - pattern: cipher.NewCTREncrypter($BLOCK, []byte("..."))
+    - pattern: cipher.NewCTR($BLOCK, []byte("..."))
+    - pattern: cipher.NewOFB($BLOCK, []byte("..."))
+    - pattern: cipher.NewCFB($BLOCK, []byte("..."))
+    - pattern: cipher.NewCBC($BLOCK, []byte("..."))
+    - pattern: cipher.NewCBCEncrypter($BLOCK, []byte{...})
+    - pattern: cipher.NewCFBEncrypter($BLOCK, []byte{...})
+    - pattern: cipher.NewCTREncrypter($BLOCK, []byte{...})
+    - pattern: cipher.NewCTR($BLOCK, []byte{...})
+    - pattern: cipher.NewOFB($BLOCK, []byte{...})
+    - pattern: cipher.NewCFB($BLOCK, []byte{...})
+    - pattern: cipher.NewCBC($BLOCK, []byte{...})
+    - pattern: $AEAD.Seal($DST, []byte("..."), ...)
+    - pattern: $AEAD.Seal($DST, []byte{...}, ...)

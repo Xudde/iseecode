@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException,
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
+from app.agent_state import claim_info
 from app.audit_labels import vuln_label
 from app.config import (ALLOWED_EXTENSIONS, DECOMPILE_EXTENSIONS, DRIVER_EXTENSIONS,
                         MAX_UPLOAD_SIZE, REPORT_DIR, UPLOAD_DIR, WORKSPACE_DIR)
@@ -36,16 +37,46 @@ ACTIVE_STATUSES = ("pending", "preprocessing", "sast", "llm_judging", "agent_ana
 # 去重时视为"已在审计/已审计"的状态
 DEDUP_BLOCK_STATUSES = ACTIVE_STATUSES + ("completed",)
 
+# 文件名 → (项目, 版本) 解析：包名重打也算同一个项目版本，补 file_hash 去重的漏洞
+_MODE_SUFFIX = re.compile(r"[_-]{1,2}(poc|static|full|large)$", re.I)
+_VERSION_RE = re.compile(r"\d+(?:\.\d+)+|20\d{6}")
+
+
+def project_version(filename: str) -> tuple[str, str]:
+    """从包名里拆 (project, version)；拆不出来就返回空串，不参与去重（避免误拦）。"""
+    stem = _MODE_SUFFIX.sub("", os.path.splitext(filename or "")[0])
+    last = None
+    for m in _VERSION_RE.finditer(stem):
+        last = m
+    if last is None:
+        return "", ""
+    name = re.sub(r"[_\-]?v$", "", stem[:last.start()].strip("_-.").lower()).strip("_-.")
+    return name, last.group(0)
+
+
+def find_version_duplicate(db: Session, filename: str) -> Task | None:
+    proj, ver = project_version(filename)
+    if not proj or not ver:
+        return None
+    for t in db.query(Task).filter(Task.status.in_(DEDUP_BLOCK_STATUSES)).order_by(Task.id).all():
+        p2, v2 = project_version(t.filename or "")
+        if p2 == proj and v2 == ver:
+            return t
+    return None
+
 
 @router.post("/upload", response_model=TaskOut)
 async def upload_zip(file: UploadFile = File(...),
                      audit_mode: str = Form("full"),
+                     force: str = Form("0"),
                      db: Session = Depends(get_db)):
     """上传源码包，创建任务并入队；同内容文件自动去重，避免重复审计浪费 token
     audit_mode: full=完整审计（Agent 深度研判+全量审计，消耗 token）；
                 static=仅静态扫描（semgrep 免费结果，不消耗 token）；
-                poc=沙箱 POC 验证（部署沙箱并验证命中，不调用 LLM/Agent，0 token）"""
-    if audit_mode not in ("full", "static", "poc"):
+                poc=沙箱 POC 验证（部署沙箱并验证命中，不调用 LLM/Agent，0 token）；
+                large=大项目模式（取消文件数熔断，heavy 队列，适合 1GB/万文件级项目）
+    force: 1=跳过"同项目同版本"去重（引擎升级后想重审同一版本时才用）"""
+    if audit_mode not in ("full", "static", "poc", "large"):
         audit_mode = "full"
     ext = Path(file.filename).suffix.lower()
     is_dockerfile = "dockerfile" in file.filename.lower() or ext == ".dockerfile"
@@ -62,6 +93,16 @@ async def upload_zip(file: UploadFile = File(...),
         ptype = "web"
     else:
         raise HTTPException(status_code=400, detail="支持 .zip 源码包 / .sys 驱动 / .apk 应用 / .tar 镜像包 / Dockerfile / 反编译文件（.jar .war .class .dex .dll .exe .pyc .so .elf）")
+
+    # 同项目同版本去重：包重新打过、hash 变了也算重复，防止多方（我/Zcode/手工）重复拉同一 release
+    if force not in ("1", "true", "yes"):
+        dup = find_version_duplicate(db, file.filename)
+        if dup is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"同项目同版本已在审计或已审计：task #{dup.id} {dup.filename}"
+                        f"（状态 {dup.status}，{str(dup.created_at)[:10]}）。"
+                        f"要重审同一版本请带 force=1；换版本请直接上传新版本包"))
 
     # 流式落盘：边收边写临时文件并增量计算哈希（旧实现整包读进内存，
     # 大文件×并发上传会吃掉数百 MB 内存）
@@ -206,7 +247,10 @@ def get_history(db: Session = Depends(get_db)):
         latest_runs.setdefault(r.task_id, r)
     for g in items:
         r = latest_runs.get(g["latest_id"])
-        g["deep_status"] = r.status if r else "pending"
+        info = claim_info(r)
+        g["deep_status"] = info["claim_state"]
+        g.update(info)
+        g["raw_run_status"] = (r.status or "") if r else ""
         g["deep_checkpoint"] = (r.checkpoint or "")[:200] if r else ""
     return {"total": len(items), "items": items}
 
@@ -229,6 +273,32 @@ def _verify_agent_token(task_id: int, token: str) -> bool:
         return hmac.compare_digest(sig, want)
     except (ValueError, TypeError):
         return False
+
+
+_SENSITIVE_SUFFIXES = (
+    ".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm", ".db-journal",
+    ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".secret",
+    ".env", ".kdbx",
+)
+_SENSITIVE_NAMES = {
+    ".auth_secret", "auth_secret", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    "credentials", "secrets", ".netrc", ".pgpass", ".htpasswd",
+}
+
+
+def _is_sensitive_rel(rel: str) -> bool:
+    """深挖包不携带运行时数据库/密钥；只发源码切片。"""
+    parts = [p for p in str(rel or "").replace("\\", "/").split("/") if p]
+    if not parts or any(p == ".." for p in parts):
+        return True
+    if any(p in (".git", ".svn", ".hg") for p in parts):
+        return True
+    name = parts[-1].lower()
+    if name in _SENSITIVE_NAMES or name.startswith(".env"):
+        return True
+    if name.startswith("id_rsa") or name.startswith("id_ed25519"):
+        return True
+    return name.endswith(_SENSITIVE_SUFFIXES)
 
 
 def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
@@ -297,7 +367,7 @@ def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
             "api": base + f"/api/tasks/{task.id}/agent-request",
             "token": _agent_token(task.id),
             "expires_in_seconds": 43200,
-            "scope": "仅该任务沙箱 HTTP 请求；不包含宿主 SSH 密码",
+            "scope": "仅该任务沙箱 HTTP 请求；不包含宿主 SSH/Kali 密码",
             "usage": "POST JSON {method,path,params}; Header X-Agent-Token: <token>",
             "exec_api": base + f"/api/tasks/{task.id}/agent-exec",
             "exec_usage": "POST JSON {command,timeout}; Header X-Agent-Token: <token>; container-only",
@@ -311,7 +381,7 @@ def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
         env_note = ("NO_RUNTIME_TOKEN：静态任务没有沙箱。只允许读 pack 内 source/ 和报告，"
                     "禁止遍历当前工作目录；标记 static_only 并结束，等待人工起沙箱。")
     else:
-        env_note = "有沙箱：优先使用任务级 HTTP/exec 代理；不要把宿主 root/SSH 密码写进任何 AI 会话。"
+        env_note = "有沙箱：优先使用任务级 HTTP/exec 代理；不要把宿主 root/Kali 密码写进任何 AI 会话。"
     environment = {
         "task_id": task.id,
         "workspace": str(task.workspace_path),
@@ -335,9 +405,11 @@ def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
 5. 输出严格按 `result_schema.json` 的 JSON，便于平台回写 AI 验真/误报统计。
 6. `environment.json` 里若有任务级 agent_token，可调用 `/api/tasks/<id>/agent-request`
    访问沙箱 HTTP，或 `/api/tasks/<id>/agent-exec` 在沙箱容器内执行命令；
-   它不是宿主 SSH 密码，且 12 小时后失效。
+   它不是宿主 SSH/Kali 密码，且 12 小时后失效。
 7. 如果 `environment.json` 的 `runtime_ready=false`：只读 pack 内 `source/` 和报告，
    **禁止遍历当前工作目录**，把 checkpoint 写 `static_only` 并结束。
+8. 包内不会携带运行时数据库/密钥（`*.db`、`*.sqlite`、`.auth_secret`、`.env`、`*.pem` 等）；
+   如果你在工作区看到这些文件，禁止读取、复制或用于登录，只能作为“存在敏感文件”的静态事实记录。
 """
     zf.writestr(prefix + "environment.json",
                 json.dumps(environment, ensure_ascii=False, indent=2))
@@ -376,9 +448,19 @@ def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
             if pth.exists():
                 zf.write(pth, prefix + arc)
     total = 0
+    excluded_sensitive = []
+    ws_root = ws.resolve()
     for it in (hot.get("items") or [])[:20]:
         rel = str(it.get("file_path") or "").replace("\\", "/").lstrip("/")
+        if _is_sensitive_rel(rel):
+            excluded_sensitive.append(rel)
+            continue
         src = ws / rel
+        try:
+            src.resolve().relative_to(ws_root)
+        except (OSError, ValueError):
+            excluded_sensitive.append(rel)
+            continue
         try:
             if not src.is_file() or src.stat().st_size > 300 * 1024:
                 continue
@@ -389,21 +471,41 @@ def _write_agent_pack(zf, task, rows, base: str, prefix: str = "") -> bool:
             total += len(data)
         except OSError:
             continue
+    if excluded_sensitive:
+        zf.writestr(prefix + "excluded_sensitive.json", json.dumps({
+            "note": "runtime secrets/databases are never packed",
+            "paths": excluded_sensitive[:200],
+        }, ensure_ascii=False, indent=2))
     return True
 
 
 @router.get("/{task_id}/agent-pack")
 def get_agent_pack(task_id: int, request: Request, db: Session = Depends(get_db)):
-    """导出单个任务的 AI 深挖包：报告 + 候选 + 清单 + 源码切片 + 提示词。"""
+    """导出单个任务的 AI 深挖包：报告 + 候选 + 清单 + 源码切片 + 提示词。
+
+    失败时不留半成品：以前 `with ZipFile(out,"w")` 先建文件再抛 404，关闭时剩下 22 字节的
+    合法空 zip，看起来像"包已生成"，下游台账会误判成可离线复核
+    （2026-11-01 实测 data/reports 里有 40 个这种空包）。
+    """
     task = db.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     rows = db.query(Vulnerability).filter(Vulnerability.task_id == task_id).all()
     out = REPORT_DIR / f"task_{task_id}_agent_pack.zip"
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
-        if not _write_agent_pack(zf, task, rows,
-                                 str(request.base_url).rstrip("/")):
-            raise HTTPException(status_code=404, detail="工作区不存在")
+    try:
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            if not _write_agent_pack(zf, task, rows, str(request.base_url).rstrip("/")):
+                raise HTTPException(status_code=404, detail="工作区不存在，无法生成深挖包")
+            entries = sum(1 for n in zf.namelist() if not n.endswith("/"))
+        if entries == 0:
+            raise HTTPException(status_code=409,
+                                detail=f"深挖包内容为空（工作区可能是空目录），不产出空包 #{task_id}")
+    except HTTPException:
+        try:
+            out.unlink()
+        except OSError:
+            pass
+        raise
     return FileResponse(out, media_type="application/zip",
                         filename=f"task_{task_id}_agent_pack.zip")
 
@@ -478,7 +580,7 @@ def agent_request(task_id: int, payload: dict = Body(...),
 def agent_exec(task_id: int, payload: dict = Body(...),
                x_agent_token: str | None = Header(None, alias="X-Agent-Token"),
                db: Session = Depends(get_db)):
-    """任务级沙箱 exec：只在容器内执行，不触碰宿主 root。"""
+    """任务级沙箱 exec：只在容器内执行，不触碰宿主/Kali root。"""
     token = x_agent_token or str(payload.get("token") or "")
     if not token or not _verify_agent_token(task_id, token):
         raise HTTPException(status_code=403, detail="agent_token 无效或已过期")
@@ -500,7 +602,7 @@ def agent_exec(task_id: int, payload: dict = Body(...),
                                  demux=False)
         text = (out.output or b"").decode(errors="replace")
         return {"exit_code": out.exit_code, "output": text[:20000],
-                "scope": "container-only; no host root"}
+                "scope": "container-only; no host/Kali root"}
     except docker.errors.NotFound:
         raise HTTPException(status_code=400, detail="沙箱容器不存在")
     except Exception as exc:
@@ -940,4 +1042,31 @@ def poc_script(task_id: int, vuln_id: int, db: Session = Depends(get_db)):
         content=script,
         media_type="text/x-python",
         headers={"Content-Disposition": f'attachment; filename="poc_task{task_id}_vuln{vuln_id}.py"'},
+    )
+
+
+@router.get("/{task_id}/poc-http/{vuln_id}")
+def poc_http(task_id: int, vuln_id: int, db: Session = Depends(get_db)):
+    """下载 Burp Repeater 原始请求包（.http）"""
+    task = db.get(Task, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    vuln = db.get(Vulnerability, vuln_id)
+    if vuln is None or vuln.task_id != task_id:
+        raise HTTPException(status_code=404, detail="漏洞不存在")
+    payload = (vuln.poc_payload or "").strip()
+    if not payload:
+        raise HTTPException(status_code=400, detail="该漏洞没有 POC payload")
+    if not re.match(r"^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+/", payload, re.I):
+        for line in (vuln.agent_evidence or "").splitlines():
+            m = re.search(r"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(/\S*)",
+                          line.strip(), re.I)
+            if m:
+                payload = f"{m.group(1).upper()} {m.group(2)}\n{payload}"
+                break
+    raw = poc.generate_burp_request(payload)
+    return Response(
+        content=raw,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="poc_task{task_id}_vuln{vuln_id}.http"'},
     )

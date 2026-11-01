@@ -1,0 +1,40 @@
+rules:
+- id: csharp-sql-injection
+  message: SQL 拼接注入风险
+  severity: ERROR
+  languages: [csharp]
+  patterns:
+    - pattern-either:
+      - pattern: new SqlCommand($Q + $X, ...)
+      - pattern: new SqlCommand(string.Format($Q, $X), ...)
+- id: csharp-command-injection
+  message: 命令注入风险（ProcessStartInfo 拼接用户输入）
+  severity: ERROR
+  languages: [csharp]
+  pattern-either:
+    - pattern: Process.Start($CMD + $ARG)
+    - pattern: Process.Start(string.Format($CMD, $ARG))
+- id: csharp-eval-loader
+  message: 动态代码执行/反序列化风险
+  severity: ERROR
+  languages: [csharp]
+  pattern-either:
+    - pattern: CSharpCodeProvider.CompileAssemblyFromSource(...)
+    - pattern: new JavaScriptSerializer().Deserialize(...)
+- id: csharp-hardcoded-secret
+  message: 硬编码密码/密钥
+  severity: WARNING
+  languages: [csharp]
+  pattern-regex: '(?i)(password|passwd|secret|apikey|api_key)\s*=\s*"[^"\n]{6,}"'
+- id: csharp-path-traversal
+  message: 路径拼接未校验，存在路径穿越风险
+  severity: WARNING
+  languages: [csharp]
+  pattern: File.ReadAllText(Path.Combine($BASE, $INPUT))
+- id: csharp-weak-crypto
+  message: 使用弱哈希算法 MD5/SHA1
+  severity: WARNING
+  languages: [csharp]
+  pattern-either:
+    - pattern: MD5.Create()
+    - pattern: SHA1.Create()

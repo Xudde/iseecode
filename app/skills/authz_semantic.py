@@ -7,8 +7,10 @@
 只做静态语义，不把“没看到注解”直接当未授权。
 """
 import json
+import os
 import re
 from pathlib import Path
+from app.skills.route_paths import normalize_path as normalize_route
 
 SKIP_DIRS = {"node_modules", "vendor", "third_party", "thirdparty", "bower_components",
              ".git", ".svn", ".hg", "__pycache__", ".venv", "venv", "dist", "build",
@@ -16,7 +18,7 @@ SKIP_DIRS = {"node_modules", "vendor", "third_party", "thirdparty", "bower_compo
              "test-cli", "testing", "e2e", "cypress", "spec", "specs",
              "__tests__", "docs", "examples", "example", "samples"}
 CODE_EXTS = {".py", ".java", ".kt", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs"}
-MAX_FILES = 6000
+MAX_FILES = int(os.environ.get("AUDIT_AUTHZ_MAX_FILES", "6000"))  # 0=不限制
 MAX_FILE_SIZE = 2 * 1024 * 1024
 
 PUBLIC_HINTS = ("login", "logout", "register", "signup", "health", "ready", "metrics",
@@ -65,7 +67,7 @@ def _iter_files(root: Path):
         except OSError:
             continue
         n += 1
-        if n > MAX_FILES:
+        if MAX_FILES > 0 and n > MAX_FILES:
             break
         yield p
 
@@ -113,6 +115,16 @@ def _arg_name(arg: str) -> str:
     a = (arg or "").strip()
     m = re.match(r"(?:await\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)", a)
     return m.group(1) if m else ""
+
+
+VERSION_ROOT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*[-_]v?\d+(?:\.\d+)+$")
+
+
+def _strip_version_root(path: str) -> str:
+    parts = [x for x in (path or "").split("/") if x]
+    if len(parts) > 1 and VERSION_ROOT.match(parts[0]):
+        return "/" + "/".join(parts[1:])
+    return path or "/"
 
 
 def _normalize_path(*parts: str) -> str:
@@ -343,6 +355,8 @@ def _scan_spring(root: Path, files: list[Path]) -> list[dict]:
             if "@PreAuthorize" in lines[i] or "@Secured" in lines[i] or "@RolesAllowed" in lines[i]:
                 class_pre += lines[i]
         for i, line in enumerate(lines):
+            if class_idx < len(lines) and i < class_idx:
+                continue
             m = JAVA_METHOD.search(line)
             if not m:
                 continue
@@ -417,9 +431,12 @@ def scan(workspace: str) -> dict:
     if any(p.suffix.lower() in (".java", ".kt") for p in files):
         items += _scan_spring(root, files)
     # 兜底：Flask/FastAPI/Go/PHP 等暂未做框架语义的栈，用启发式清单补齐未覆盖路径
-    covered = {(it["method"], it["path"]) for it in items}
+    for it in items:
+        if it.get("path"):
+            it["path"] = _strip_version_root(it["path"])
+    covered = {(it["method"], normalize_route(it["path"])) for it in items}
     for it in _fallback_inventory(root):
-        key = (it["method"], it["path"])
+        key = (it["method"], normalize_route(it["path"]))
         if key not in covered:
             items.append(it)
             covered.add(key)
@@ -435,7 +452,7 @@ def scan(workspace: str) -> dict:
         counts[it["labels"]] = counts.get(it["labels"], 0) + 1
     return {"summary": {"endpoints": len(uniq), "by_label": counts,
                         "note": "框架级静态语义；conditional=受运行时配置控制，必须动态验证"},
-            "items": uniq[:500]}
+            "items": uniq[:int(os.environ.get("AUDIT_AUTHZ_SEMANTIC_MAX", "2000"))]}
 
 
 def to_markdown(data: dict, task=None) -> str:

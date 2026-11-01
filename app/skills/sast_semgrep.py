@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from app.config import SAST_TIMEOUT, DATA_DIR
+from app.skills import rule_packs
 
 RULES_DIR = Path(__file__).parent / "rules"
 RULE_LANG_FILES = {
@@ -65,7 +66,8 @@ def _run_semgrep(configs: list[str], workspace: str, timeout: int = SAST_TIMEOUT
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        raise RuntimeError("semgrep 输出解析失败")
+        head = (proc.stdout or "").strip().replace("\n", " ")[:180]
+        raise RuntimeError(f"semgrep 输出解析失败: {head!r}")
     return data.get("results", [])
 
 
@@ -133,22 +135,32 @@ def _vuln_category(rule_id: str) -> str:
     return "misc"
 
 
-def run_sast(workspace: str, techs: list[str] | str) -> list[dict]:
+def run_sast(workspace: str, techs: list[str] | str, log_fn=None) -> list[dict]:
     """执行 semgrep 多栈扫描，返回漏洞列表 [{rule_id, severity, file_path, line, code_snippet}]"""
     if isinstance(techs, str):
         techs = [techs] if techs != "unknown" else []
     techs = techs[:MAX_SCAN_STACKS]
+    log = log_fn or (lambda m: None)
+    pack_configs, pack_note = rule_packs.selected_configs()
+    if rule_packs.mode() != "off":
+        log(pack_note)
 
     all_results: list[dict] = []
     official = _official_configs(techs[0]) if techs else []
 
     for i, tech in enumerate(techs):
         rule_file = RULES_DIR / RULE_LANG_FILES.get(tech, "")
-        configs: list[str] = []
+        local_configs: list[str] = []
         if rule_file.exists():
-            configs.append(str(rule_file))
+            local_configs.append(str(rule_file))
+        framework_file = RULES_DIR / "framework.yaml"
+        if framework_file.exists():
+            local_configs.append(str(framework_file))
+        configs = list(local_configs)
         if i == 0 and official:
             configs += official
+        if i == 0 and pack_configs:
+            configs += pack_configs
         if not configs:
             configs = ["auto"]  # 完全无规则时兜底 auto
         timeout = SAST_TIMEOUT_OFFICIAL
@@ -157,11 +169,19 @@ def run_sast(workspace: str, techs: list[str] | str) -> list[dict]:
         except RuntimeError as e:
             import logging
             logging.getLogger("sast").warning(f"扫描 {tech} 失败: {e}")
+            if local_configs:
+                log(f"semgrep {tech} 规则包失败（{e}），回退本地规则重扫")
+                try:
+                    all_results += _run_semgrep(local_configs, workspace, timeout=timeout)
+                except RuntimeError as e2:
+                    log(f"semgrep {tech} 本地规则也失败: {e2}")
+            else:
+                log(f"semgrep {tech} 失败: {e}")
 
     # 第一层去重（规则+文件+行）→ 第二层：同一文件同一行同一类别只保留严重性最高的一条
     _sev_rank = {"ERROR": 0, "HIGH": 0, "WARNING": 1, "MEDIUM": 1, "INFO": 2, "LOW": 2}
     all_results.sort(key=lambda r: _sev_rank.get((r.get("extra", {}).get("severity") or "").upper(), 3))
-    return _post_process(all_results, workspace)
+    return _drop_cross_engine_duplicates(_post_process(all_results, workspace))
 
 def _clean_text(t: str) -> str:
     """清除 semgrep 官方规则包注入的页脚（如 'requires login'），避免污染展示与 Agent 上下文"""
@@ -200,15 +220,34 @@ def _post_process(all_results, workspace: str):
                 snippet = "\n".join(src_lines[max(0, line - 2): line + 1])[:1000]
             except Exception:
                 pass
+        meta = (r.get("extra") or {}).get("metadata") or {}
+        cross_engine = str(meta.get("cross_engine") or "").strip()
+        msg = _clean_text(r.get("extra", {}).get("message", ""))
+        if cross_engine:
+            msg = (msg + "；cross_engine=" + cross_engine)[:300]
         vulns.append({
             "rule_id": check_id,
+            "cross_engine": cross_engine,
             "severity": (r.get("extra", {}).get("severity") or "").upper(),
             "file_path": fp,
             "line": line,
             "code_snippet": snippet,
-            "message": _clean_text(r.get("extra", {}).get("message", "")),
+            "message": msg,
         })
     return _aggregate_noisy(vulns)
+
+
+def _drop_cross_engine_duplicates(vulns):
+    others = {(v.get("file_path"), v.get("line")) for v in vulns
+              if "site-" not in str(v.get("rule_id") or "")}
+    out = []
+    for v in vulns:
+        rid = str(v.get("rule_id") or "")
+        ce = str(v.get("cross_engine") or "")
+        if "site-" in rid and ce.startswith("duplicate") and (v.get("file_path"), v.get("line")) in others:
+            continue
+        out.append(v)
+    return out
 
 
 # 高频低信噪规则：按“规则 + 文件”聚合，避免一个 HTML 文件里几百个 inline script

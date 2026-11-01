@@ -24,13 +24,21 @@
 
 <div class="stats" id="verified-stats"></div>
 
+<style>
+.verify-detail { padding: 14px 18px 16px; border-top: 1px dashed var(--line); background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.verify-detail-label { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: .04em; margin-bottom: 6px; }
+.verify-chain { white-space: normal; line-height: 1.7; font-size: 12px; margin-bottom: 10px; word-break: break-word; }
+.evidence-pre { margin: 0; padding: 12px 14px; max-height: 440px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.65; background: var(--code-bg, rgba(0,0,0,.18)); border: 1px solid var(--line); border-radius: 8px; }
+.detail-row[hidden] { display: none; }
+</style>
+
 <div class="card" style="padding:0;overflow:hidden">
   <div class="tbl-wrap" style="border:none;border-radius:0">
     <table class="tbl">
       <thead><tr>
         <th style="width:60px">#</th><th style="width:90px">等级</th>
         <th>漏洞 / 任务</th><th style="width:190px">位置</th>
-        <th style="width:260px">POC</th><th style="width:120px">证据</th>
+        <th style="width:260px">POC</th><th style="width:90px">查看</th>
       </tr></thead>
       <tbody id="verified-body"></tbody>
     </table>
@@ -78,12 +86,15 @@ function renderVerified() {
         <pre class="code" style="margin:0;max-height:110px;white-space:pre-wrap">${SAP.esc(x.payload || '—')}</pre>
         ${x.payload ? `<button class="btn btn-sm" data-poc="${SAP.esc(x.payload)}">复制 POC</button>` : ''}
       </td>
-      <td>
-        <details><summary>查看</summary>
-          ${x.chain ? `<div class="muted" style="white-space:normal;font-size:11px;max-width:520px;margin-bottom:6px">
-            利用链（${x.chain.verified ? '已验证' : '待验证'}）：${SAP.esc((x.chain.nodes || []).map(n => n.label || n.type || '').join(' → '))}</div>` : ''}
-          <div class="muted" style="white-space:pre-wrap;font-size:11px;max-width:520px">${SAP.esc((x.verify_result || '') + '\n' + (x.evidence || ''))}</div>
-        </details>
+      <td><button class="btn btn-sm" data-detail-toggle="vd-${i}">查看</button></td>
+    </tr>
+    <tr class="detail-row" id="vd-${i}" hidden>
+      <td colspan="6">
+        <div class="verify-detail">
+          ${x.chain ? `<div class="verify-chain"><span class="verify-detail-label">利用链（${x.chain.verified ? '已验证' : '待验证'}）</span><br>${SAP.esc((x.chain.nodes || []).map(n => n.label || n.type || '').join(' → '))}</div>` : ''}
+          <div class="verify-detail-label">动态验证证据</div>
+          <pre class="evidence-pre">${SAP.esc([x.verify_result, x.evidence].filter(Boolean).join('\n\n')) || '（无证据）'}</pre>
+        </div>
       </td>
     </tr>`).join('') || '<tr><td colspan="6"><div class="empty">还没有动态复现结果</div></td></tr>';
   document.getElementById('verified-stats').innerHTML = `
@@ -93,6 +104,15 @@ function renderVerified() {
 }
 
 document.getElementById('verified-body').addEventListener('click', async e => {
+  const toggle = e.target.closest('[data-detail-toggle]');
+  if (toggle) {
+    const row = document.getElementById(toggle.dataset.detailToggle);
+    if (row) {
+      row.hidden = !row.hidden;
+      toggle.textContent = row.hidden ? '查看' : '收起';
+    }
+    return;
+  }
   const btn = e.target.closest('[data-poc]');
   if (!btn) return;
   try { await copyText(btn.dataset.poc); SAP.toast('POC 已复制', 'ok'); }

@@ -1,0 +1,44 @@
+rules:
+- id: kotlin-sql-injection
+  message: SQL 拼接注入风险（execSQL/rawQuery）
+  severity: ERROR
+  languages:
+  - kotlin
+  pattern-either:
+  - pattern: $DB?.execSQL($SQL + $X)
+  - pattern: $DB.execSQL($SQL + $X)
+  - pattern: $DB?.rawQuery($SQL + $X, ...)
+  - pattern: $DB.rawQuery($SQL + $X, ...)
+  - pattern: $DB.execSQL(String.format($SQL, $X))
+- id: kotlin-command-injection
+  message: Runtime 命令执行，存在命令注入风险
+  severity: ERROR
+  languages:
+  - kotlin
+  pattern-either:
+  - pattern: Runtime.getRuntime().exec($CMD + $X)
+  - pattern: Runtime.getRuntime().exec(String.format($CMD, $X))
+- id: kotlin-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages:
+  - kotlin
+  pattern-regex: (?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"
+- id: kotlin-insecure-trust
+  message: 信任所有证书，存在中间人攻击风险
+  severity: ERROR
+  languages:
+  - kotlin
+  pattern: X509TrustManager
+- id: kotlin-allowbackup
+  message: 应用允许备份，数据可被导出
+  severity: WARNING
+  languages:
+  - kotlin
+  pattern-regex: android:allowBackup\s*=\s*"true"
+- id: kotlin-weak-crypto
+  message: 使用弱哈希算法 MD5
+  severity: WARNING
+  languages:
+  - kotlin
+  pattern: MessageDigest.getInstance("MD5")

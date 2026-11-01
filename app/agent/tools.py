@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 log = logging.getLogger("agent.tools")
+SANDBOX_EXEC_TIMEOUT = max(3, int(os.environ.get("AUDIT_SANDBOX_EXEC_TIMEOUT", "20")))
 
 SKIP_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", "vendor", "target", "build", "dist", ".gradle", ".idea"}
 

@@ -1,0 +1,33 @@
+rules:
+- id: rust-command-injection
+  message: Command 参数拼接用户输入，存在命令注入风险
+  severity: ERROR
+  languages: [rust]
+  pattern-either:
+    - pattern: Command::new($CMD + $X)
+    - pattern: "format!($CMD, $X).arg(...)"
+- id: rust-unsafe-block
+  message: unsafe 代码块，需人工审计内存安全
+  severity: WARNING
+  languages: [rust]
+  pattern: "unsafe { ... }"
+- id: rust-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages: [rust]
+  pattern-regex: '(?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"'
+- id: rust-static-mut
+  message: static mut 全局可变状态，存在数据竞争风险
+  severity: WARNING
+  languages: [rust]
+  pattern: "static mut $X : $T"
+- id: rust-expect-panic
+  message: 生产代码使用 unwrap，可能 panic 崩溃
+  severity: INFO
+  languages: [rust]
+  pattern: $X.unwrap()
+- id: rust-mem-transmute
+  message: mem::transmute 类型强转，存在未定义行为风险
+  severity: ERROR
+  languages: [rust]
+  pattern: mem::transmute(...)

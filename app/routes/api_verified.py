@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.agent_evidence import has_dynamic_evidence, parse_evidence
 from app.models import ExploitChain, Task, Vulnerability
 from app.routes.api_config import get_db
 
@@ -32,26 +33,25 @@ def list_verified(q: str = "", severity: str = "", task_id: int | None = None,
             v.title, v.rule_id, v.file_path, t.filename, v.verify_result, v.agent_evidence))
         if q and q.lower() not in blob.lower():
             continue
-        dynamic_blob = " ".join(str(x or "") for x in (
-            v.poc_payload, v.verify_result, v.agent_evidence)).lower()
-        dynamic = bool((v.poc_payload or "").strip()) or any(
-            k in dynamic_blob for k in ("request", "response", "http", "uid=",
-                                        "cmdinj", "sleep", "timing", "延时",
-                                        "回显", "curl", "post /", "get /", "console"))
-        if v.poc_verified is not True and v.agent_status != "verified":
+        req, resp = parse_evidence(v.agent_evidence or "")
+        dynamic = bool(v.poc_verified is True) or has_dynamic_evidence({
+            "request": req, "response": resp,
+            "agent_evidence": v.agent_evidence,
+        })
+        if not dynamic:
             continue
         rule_low = str(v.rule_id or "").lower()
         title_low = str(v.title or "").lower()
         if rule_low.startswith(("giants:trivy", "giants:self-cve", "giants:gitleaks")):
             continue
-        attack_hints = ("injection", "eval", "exec", "execution", "command", "xss", "ssrf",
-                        "traversal", "deserial", "upload", "sql", "xxe", "template",
-                        "csrf", "authz", "unauth", "rce", "path", "redirect",
-                        "dynamic", "method", "chain", "file")
-        if not any(k in rule_low or k in title_low for k in attack_hints):
-            continue
-        if not dynamic:
-            continue
+        if v.poc_verified is not True:
+            attack_hints = ("injection", "eval", "exec", "execution", "command", "xss", "ssrf",
+                            "traversal", "deserial", "upload", "sql", "xxe", "template",
+                            "csrf", "authz", "unauth", "rce", "path", "redirect",
+                            "dynamic", "method", "chain", "file",
+                            "admin", "password", "credential", "default", "auth")
+            if not any(k in rule_low or k in title_low for k in attack_hints):
+                continue
         items.append({
             "id": v.id, "task_id": t.id, "task_filename": t.filename,
             "title": v.title or v.rule_id, "rule_id": v.rule_id,

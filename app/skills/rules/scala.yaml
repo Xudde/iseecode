@@ -1,0 +1,41 @@
+rules:
+- id: scala-sql-injection
+  message: SQL 拼接注入风险
+  severity: ERROR
+  languages:
+  - scala
+  pattern-either:
+  - pattern: $STMT.executeQuery($SQL + $X)
+  - pattern: $STMT.execute($SQL + $X)
+- id: scala-command-injection
+  message: Process 命令执行，存在命令注入风险
+  severity: ERROR
+  languages:
+  - scala
+  pattern-either:
+  - pattern: $CMD ! $X
+  - pattern: Process($CMD + $X)
+- id: scala-deserialization
+  message: Java 反序列化风险
+  severity: ERROR
+  languages:
+  - scala
+  pattern: new ObjectInputStream(...)
+- id: scala-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages:
+  - scala
+  pattern-regex: (?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"
+- id: scala-weak-crypto
+  message: 使用弱哈希算法 MD5
+  severity: WARNING
+  languages:
+  - scala
+  pattern: MessageDigest.getInstance("MD5")
+- id: scala-xss-play
+  message: Play 框架 Html 输出未转义，XSS 风险
+  severity: WARNING
+  languages:
+  - scala
+  pattern: Html(...)

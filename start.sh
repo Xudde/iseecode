@@ -12,6 +12,8 @@ export AUTH_TOKEN
 export AUTH_USER="${AUTH_USER:-admin}"
 export AUTH_PASS="${AUTH_PASS:-}"
 export TZ="${TZ:-Asia/Shanghai}"
+# 开源规则包：test = gosec/njsscan 移植；off 关闭；extended 预留
+export AUDIT_RULE_PACKS_MODE="${AUDIT_RULE_PACKS_MODE:-test}"
 export AUDIT_MOBSF_URL="${AUDIT_MOBSF_URL:-http://127.0.0.1:8010}"
 export AUDIT_MOBSF_KEY="${AUDIT_MOBSF_KEY:-}"
 

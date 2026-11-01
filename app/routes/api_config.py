@@ -127,6 +127,16 @@ def update_config(data: ConfigUpdate, db: Session = Depends(get_db)):
         elif k == "codeql_threads":
             if not 1 <= v <= 8:
                 continue
+        elif k == "codeql_java_buildless":
+            if v not in (0, 1):
+                continue
+        elif k == "codeql_high_value":
+            if v not in (0, 1):
+                continue
+        elif k in ("full_audit_max_files", "codeql_max_files",
+                   "codeql_db_timeout", "codeql_analyze_timeout", "codeql_min_free_mb"):
+            if v < 0:
+                continue
         elif v < 1:
             continue
         row = db.get(Config, k)

@@ -75,7 +75,7 @@ async function loadEvents() {
         <td><code>${SAP.esc(x.cve || x.advisory_id)}</code></td>
         <td>
           <div><b>${SAP.esc(x.package)}</b> <span class="muted">${SAP.esc(x.ecosystem)}</span></div>
-          <div class="muted" style="font-size:11px;max-width:560px;white-space:normal">${SAP.esc((x.summary || '').slice(0, 160))}</div>
+          <div class="muted" style="font-size:11px;max-width:560px;white-space:pre-wrap">${SAP.multiline((x.summary || '').slice(0, 160))}</div>
         </td>
         <td><span class="pill ${x.severity === 'HIGH' || x.severity === 'CRITICAL' ? 'fp' : 'na'}">${SAP.esc(x.severity || '—')}</span></td>
         <td>${x.task_id ? `<a href="/tasks/${x.task_id}">#${x.task_id}</a>` : '—'}</td>

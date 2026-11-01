@@ -40,6 +40,7 @@ def task_detail(request: Request, task_id: int, db: Session = Depends(get_db)):
     return TEMPLATES.TemplateResponse(
         request, "task_detail.html",
         {"task": task, "vulns": vulns, "vuln_labels": labels},
+        status_code=404 if task is None else 200,
     )
 
 
@@ -81,3 +82,8 @@ def audit_page(request: Request):
 @router.get("/verified", response_class=HTMLResponse)
 def verified_page(request: Request):
     return TEMPLATES.TemplateResponse(request, "verified.html", {})
+
+
+@router.get("/labs", response_class=HTMLResponse)
+def labs_page(request: Request):
+    return TEMPLATES.TemplateResponse(request, "labs.html", {})

@@ -22,7 +22,7 @@
         <th style="width:40px"><input type="checkbox" id="history-all"></th>
         <th style="width:80px">最近任务</th><th>项目文件</th><th style="width:160px">类型 / 技术栈</th>
         <th style="width:150px">首次审计</th><th style="width:150px">最近审计</th>
-        <th style="width:80px">次数</th><th style="width:90px">命中</th><th style="width:100px">状态</th>
+        <th style="width:80px">次数</th><th style="width:90px">命中</th><th style="width:100px">状态</th><th style="width:110px">深挖执行</th>
         <th style="width:90px">操作</th>
       </tr></thead>
       <tbody id="history-body"></tbody>
@@ -57,7 +57,7 @@ function renderHistory() {
       <td style="font-family:var(--mono)">${x.runs}</td>
       <td style="font-family:var(--mono);font-weight:700">${x.vuln_count}</td>
       <td>${SAP.statusPill(x.latest_status)}</td>
-      <td><span class="pill ${x.deep_status === 'completed' ? 'ok' : (x.deep_status === 'running' ? 'na' : 'dash')}">${SAP.esc(x.deep_status || 'pending')}</span></td>
+      <td><span class="pill ${x.deep_status === 'completed' ? 'ok' : (x.deep_status === 'running' ? 'na' : 'dash')}">${SAP.esc(({completed:"已完成 · 可收菜",running:"已接取",pending:"待接取"}[x.deep_status] || "待接取"))}</span></td>
       <td><a class="btn btn-sm" href="/tasks/${x.latest_id}">查看</a></td>
     </tr>`).join('') || '<tr><td colspan="11"><div class="empty">没有匹配的历史审计项目</div></td></tr>';
   document.getElementById('history-summary').textContent =

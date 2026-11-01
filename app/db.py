@@ -6,7 +6,7 @@ from app.config import DB_URL
 
 engine = create_engine(
     DB_URL,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30},
 )
 
 # SQLite 启用 WAL 模式：允许读写并发，降低 LLM 长调用期间的锁冲突

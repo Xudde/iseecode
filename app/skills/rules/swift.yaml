@@ -1,0 +1,33 @@
+rules:
+- id: swift-sql-injection
+  message: SQL 字符串拼接注入风险
+  severity: ERROR
+  languages: [swift]
+  pattern-either:
+    - pattern: $DB.executeQuery($SQL + $X, ...)
+    - pattern: "String(format: $SQL, $X)"
+- id: swift-command-injection
+  message: Process 命令执行，存在命令注入风险
+  severity: ERROR
+  languages: [swift]
+  pattern: "Process()"
+- id: swift-hardcoded-secret
+  message: 硬编码密钥/密码
+  severity: WARNING
+  languages: [swift]
+  pattern-regex: '(?i)(password|secret|api_key)\s*=\s*"[^"\n]{6,}"'
+- id: swift-nsallow-arbitrary-load
+  message: 允许任意 HTTP 明文传输（NSAllowsArbitraryLoads）
+  severity: WARNING
+  languages: [swift]
+  pattern-regex: 'NSAllowsArbitraryLoads\s*=\s*(true|YES)'
+- id: swift-print-sensitive
+  message: 可能输出敏感信息的调试打印
+  severity: INFO
+  languages: [swift]
+  pattern: print(...)
+- id: swift-force-unwrap
+  message: 强制解包 !，运行时可能崩溃
+  severity: INFO
+  languages: [swift]
+  pattern: "$X!"

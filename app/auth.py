@@ -22,8 +22,8 @@ AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 AUTH_TOKEN_AUDITOR = os.environ.get("AUTH_TOKEN_AUDITOR", "").strip()
 AUTH_TOKEN_VIEWER = os.environ.get("AUTH_TOKEN_VIEWER", "").strip()
 AUTH_ENABLED = bool(AUTH_TOKEN or AUTH_TOKEN_AUDITOR or AUTH_TOKEN_VIEWER)
-AUTH_USER = os.environ.get("AUTH_USER", "admin").strip()
-AUTH_PASS = os.environ.get("AUTH_PASS", "")
+AUTH_USER = os.environ.get("AUTH_USER", "Xudde").strip()
+AUTH_PASS = os.environ.get("AUTH_PASS", "123456")
 
 # 允许匿名访问的路径
 PUBLIC_PATHS = {"/login", "/static"}

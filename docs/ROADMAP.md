@@ -1,4 +1,11 @@
-# ISeeCode 路线与状态（v4.8）
+# ISeeCode 路线与状态（v4.9）
+
+## v4.9 增量（2026-11-01）
+
+- 多语言内置 Semgrep 规则覆盖 16 种语言；PHP 定向规则扩到 13 条
+- 开源规则包：gosec 7 条 + njsscan 21 条；test/off 可切换，extended 预留；定向规则走 `data/rules/`
+- 路由提取修复：Java 类级注解、JS 变量/多行 Express、Django URLconf
+- Agent 动态证据/领取状态、任务去重、依赖 CVE 递归扫描、P1/P2 UI 修复
 
 ## 已完成主线
 

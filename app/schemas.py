@@ -77,6 +77,12 @@ class ConfigUpdate(BaseModel):
     engine_authz: int | None = None
     codeql_ram_mb: int | None = None
     codeql_threads: int | None = None
+    codeql_max_files: int | None = None
+    codeql_db_timeout: int | None = None
+    codeql_analyze_timeout: int | None = None
+    codeql_min_free_mb: int | None = None
+    codeql_java_buildless: int | None = None
+    codeql_high_value: int | None = None
     night_enabled: int | None = None
     night_start: str = ""
     night_end: str = ""
@@ -116,6 +122,12 @@ class ConfigOut(BaseModel):
     engine_authz: str = "1"
     codeql_ram_mb: str = "4096"
     codeql_threads: str = "2"
+    codeql_max_files: str = "10000"
+    codeql_db_timeout: str = "1800"
+    codeql_analyze_timeout: str = "1800"
+    codeql_min_free_mb: str = "1024"
+    codeql_java_buildless: str = "1"
+    codeql_high_value: str = "0"
     night_enabled: str = "0"
     night_start: str = "23:00"
     night_end: str = "08:45"
